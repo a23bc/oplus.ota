@@ -102,6 +102,27 @@ public final class TracerConfig {
     /** Background dex scans (keyword + deep method-name scan). */
     public static final boolean ENABLE_DEX_SCAN = true;
 
+    /**
+     * Classes whose real name is known from a stack trace but whose methods are
+     * obfuscated. Resolved from the r4 trace: ecdsaSignPki is
+     * com.oplus.ota.downloader.util.b.d(), getGkaReqDownloadType is b.i(), and
+     * the "SignVerifyUtils" name in the dex is an empty shell that throws
+     * ClassNotFoundException. For these we hook every declared method.
+     */
+    public static final String[] SIGN_VERIFY_EXACT_CLASSES = {
+            "com.oplus.ota.downloader.util.b",
+    };
+
+    /**
+     * Library prefixes, used to tell app code from bundled dependencies when the
+     * class name alone cannot (obfuscated top-level packages like u7.a).
+     */
+    public static final String[] LIBRARY_PREFIXES = {
+            "android.", "androidx.", "com.android.", "java.", "javax.", "kotlin.",
+            "kotlinx.", "dalvik.", "org.", "com.google.", "com.squareup.", "okhttp3.",
+            "okio.", "org.jetbrains.", "com.tencent.", "com.oplus.anim.",
+    };
+
     // ------------------------------------------------------------ scheduling
     //
     // All discovery work runs off the main thread and is rate limited. The :ui

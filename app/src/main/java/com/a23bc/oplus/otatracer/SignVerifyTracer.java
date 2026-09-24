@@ -4,6 +4,7 @@ import java.security.Key;
 
 import de.robv.android.xposed.XC_MethodHook;
 import de.robv.android.xposed.XposedBridge;
+import de.robv.android.xposed.XposedHelpers;
 import de.robv.android.xposed.callbacks.XC_LoadPackage;
 
 /**
@@ -29,6 +30,23 @@ public final class SignVerifyTracer {
             return;
         }
         installed = true;
+
+        // Classes identified from the r4 stack trace. Their method names are
+        // obfuscated (ecdsaSignPki -> b.d()), so hook everything they declare.
+        for (String fqcn : TracerConfig.SIGN_VERIFY_EXACT_CLASSES) {
+            Class<?> c = null;
+            try {
+                c = XposedHelpers.findClassIfExists(fqcn, lpparam.classLoader);
+            } catch (Throwable t) {
+                c = null;
+            }
+            if (c != null) {
+                attachAll(c);
+            } else {
+                OtaLog.i(SCOPE, "no exact class " + fqcn);
+            }
+        }
+
         try {
             ClassHunter.watch("SignVerifyUtils",
                     TracerConfig.SIGN_VERIFY_CLASS_CANDIDATES,
@@ -63,6 +81,56 @@ public final class SignVerifyTracer {
         } else {
             OtaLog.i(SCOPE, "no target method on " + clazz.getName()
                     + " - keeping the deep scan armed");
+        }
+    }
+
+    /** Every declared method, for obfuscated SignVerify classes. */
+    private static void attachAll(Class<?> clazz) {
+        OtaLog.i(SCOPE, "attach-all class=" + clazz.getName());
+        int hooked = ClassHunter.hookAllDeclaredMethods(clazz, new AnyMethodCallback(),
+                SCOPE, TracerConfig.MAX_METHODS_PER_CLASS);
+        if (hooked > 0) {
+            ClassHunter.markSatisfied("SignVerifyUtils");
+        }
+    }
+
+    /**
+     * Generic observer for a class whose method names are meaningless: prints
+     * arguments, return value and any exception, without touching any of them.
+     */
+    private static final class AnyMethodCallback extends XC_MethodHook {
+
+        @Override
+        protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+            try {
+                StringBuilder sb = new StringBuilder()
+                        .append(param.method.getName()).append(" enter");
+                Object[] args = param.args;
+                if (args != null) {
+                    for (int i = 0; i < args.length; i++) {
+                        sb.append(" arg[").append(i).append("]=").append(OtaLog.describe(args[i]));
+                    }
+                }
+                OtaLog.i(SCOPE, sb.toString());
+            } catch (Throwable t) {
+                OtaLog.err(SCOPE, "method enter logging failed", t);
+            }
+        }
+
+        @Override
+        protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+            try {
+                if (param.hasThrowable()) {
+                    OtaLog.i(SCOPE, param.method.getName() + " threw");
+                    OtaLog.stack(SCOPE, param.method.getName() + " exception:",
+                            param.getThrowable());
+                    return;
+                }
+                OtaLog.i(SCOPE, param.method.getName() + " return "
+                        + OtaLog.describe(param.getResult()));
+            } catch (Throwable t) {
+                OtaLog.err(SCOPE, "method exit logging failed", t);
+            }
         }
     }
 

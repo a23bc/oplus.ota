@@ -49,6 +49,23 @@ public final class KeyStoreTracer {
         hookSignature("java.security.Signature$Delegate", "initSign", java.security.PrivateKey.class);
         hookSignature("java.security.Signature", "sign");
         hookSignature("java.security.Signature$Delegate", "sign");
+
+        // Why is ota_pki_attest missing? Watch every place a key could be created
+        // or imported. The r4 trace showed no KeyPairGenerator.getInstance call at
+        // all, so "was it ever generated" is the open question.
+        hook(java.security.KeyPairGenerator.class, "generateKeyPair");
+        hook(java.security.KeyPairGenerator.class, "initialize",
+                java.security.spec.AlgorithmParameterSpec.class, java.security.SecureRandom.class);
+        hook(java.security.KeyPairGenerator.class, "initialize", int.class,
+                java.security.SecureRandom.class);
+        hook(java.security.KeyGenerator.class, "generateKey");
+        hook(java.security.KeyStore.class, "setEntry", String.class,
+                java.security.KeyStore.Entry.class,
+                java.security.KeyStore.ProtectionParameter.class);
+        hook(java.security.KeyStore.class, "setKeyEntry", String.class, Key.class,
+                char[].class, java.security.cert.Certificate[].class);
+        hook(java.security.KeyStore.class, "deleteEntry", String.class);
+        hook(java.security.KeyStore.class, "containsAlias", String.class);
     }
 
     private static void hookSignature(String cls, String method, Class<?>... params) {

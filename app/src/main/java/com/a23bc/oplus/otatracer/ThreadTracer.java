@@ -59,10 +59,29 @@ public final class ThreadTracer {
         }
     }
 
+    /**
+     * "Ours" means shipped by the app, not by the framework. A package prefix
+     * test is not enough: obfuscation renames top-level packages to single
+     * letters (u7.a, b7.c, s9.b), so class loader identity is used instead -
+     * boot classes have a null loader. Known library prefixes are excluded too.
+     */
+    private static boolean isOurs(Class<?> clazz) {
+        if (clazz.getClassLoader() == null) {
+            return false;
+        }
+        String cn = clazz.getName();
+        for (String lib : TracerConfig.LIBRARY_PREFIXES) {
+            if (cn.startsWith(lib)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     /** Report + trace an OTA-owned runnable/thread class, once each. */
     private static void note(Class<?> clazz, String label) {
         String cn = clazz.getName();
-        boolean ours = cn.startsWith(TracerConfig.TARGET_PACKAGE);
+        boolean ours = isOurs(clazz);
         OtaLog.i(SCOPE, label + " class=" + cn + " ours=" + ours);
         if (!ours) {
             return;

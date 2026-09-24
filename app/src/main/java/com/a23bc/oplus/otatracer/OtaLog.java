@@ -122,6 +122,28 @@ public final class OtaLog {
         if (o instanceof Key) {
             return describeKey((Key) o);
         }
+        if (o instanceof android.security.keystore.KeyGenParameterSpec) {
+            android.security.keystore.KeyGenParameterSpec s =
+                    (android.security.keystore.KeyGenParameterSpec) o;
+            byte[] challenge = null;
+            try {
+                challenge = s.getAttestationChallenge();
+            } catch (Throwable ignored) {
+                // Older API levels simply do not have it.
+            }
+            // alias is an identifier; the challenge is length-only, never content.
+            return "KeyGenParameterSpec(alias=" + s.getKeystoreAlias()
+                    + " purposes=" + s.getPurposes()
+                    + " attestChallenge="
+                    + (challenge == null ? "null" : "byte[" + challenge.length + "]")
+                    + ")";
+        }
+        if (o instanceof java.security.KeyPair) {
+            // Algorithm / class only: never key material.
+            java.security.KeyPair kp = (java.security.KeyPair) o;
+            return "KeyPair pub=[" + describeKey(kp.getPublic()) + "] priv=["
+                    + describeKey(kp.getPrivate()) + "]";
+        }
         if (o instanceof Class<?>) {
             return "class " + ((Class<?>) o).getName();
         }

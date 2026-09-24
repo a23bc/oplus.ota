@@ -442,6 +442,39 @@ public final class ClassHunter {
         }
     }
 
+    /**
+     * Hook every declared method of a class, for classes whose real name is known
+     * but whose method names were obfuscated away. Capped, never modifies the
+     * invocation. Returns the number of hooked overloads.
+     */
+    public static int hookAllDeclaredMethods(Class<?> clazz,
+                                             XC_MethodHook callback,
+                                             String scope,
+                                             int maxMethodNames) {
+        Method[] declared;
+        try {
+            declared = clazz.getDeclaredMethods();
+        } catch (Throwable t) {
+            OtaLog.err(scope, "cannot list methods of " + clazz.getName(), t);
+            return 0;
+        }
+        Set<String> names = new java.util.LinkedHashSet<>();
+        for (Method m : declared) {
+            if (m.isSynthetic()) {
+                continue;
+            }
+            names.add(m.getName());
+            if (names.size() >= maxMethodNames) {
+                break;
+            }
+        }
+        int hooked = 0;
+        for (String name : names) {
+            hooked += hookAllByName(clazz, name, callback, scope);
+        }
+        return hooked;
+    }
+
     /** Hook every constructor of a class; never modifies the invocation. */
     public static void hookAllConstructors(Class<?> clazz,
                                            XC_MethodHook callback,
