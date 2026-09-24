@@ -172,3 +172,17 @@ grep 门禁依旧通过）、**不跳过签名**，服务端照常验签。只�
 （混淆兼容的类定位）、`OtaLog`（脱敏日志）、`TracerConfig`（目标常量）、
 `SignVerifyTracer` / `GetInfoThreadTracer` / `DownloadExceptionTracer` /
 `ResponseCodeTracer` / `KeyStoreTracer` / `SpTracer` / `LogTracer`。
+
+
+## 分支约定（2026-09-25 修正）
+
+**远端默认分支是 `feat/ota-download-tracer`，不是 `main`。**
+`main` 是我这轮用 `git push origin tracer:main` 推出来的镜像分支，属于多余的。
+
+- 本地分支固定叫 `tracer`（**本机 git 写不了带斜杠的 ref**，所以不能建同名分支，
+  也设不了 upstream tracking）
+- 推默认分支用显式 refspec：
+  ```bash
+  git push origin tracer:feat/ota-download-tracer
+  ```
+- 不要再往 `main` 推
