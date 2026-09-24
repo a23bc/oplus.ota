@@ -40,6 +40,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
             ResponseCodeTracer.install(lpparam);
             KeyStoreTracer.install(lpparam);
             SpTracer.install(lpparam);
+            ThreadTracer.install(lpparam);
             if (TracerConfig.ENABLE_LOG_ECHO) {
                 LogTracer.install(lpparam);
             }

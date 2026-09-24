@@ -37,7 +37,13 @@ public final class LogTracer {
         try {
             // Log is a boot class: pass the Class object directly instead of
             // asking a (possibly already busy) app class loader to resolve it.
-            XposedHelpers.findAndHookMethod(Log.class, method, params, new LogCallback(method));
+            // The parameter types must be flattened into the varargs, otherwise
+            // the Class[] itself is treated as one parameter type and
+            // findAndHookMethod throws ClassNotFoundError.
+            Object[] call = new Object[params.length + 1];
+            System.arraycopy(params, 0, call, 0, params.length);
+            call[params.length] = new LogCallback(method);
+            XposedHelpers.findAndHookMethod(Log.class, method, call);
             OtaLog.i(SCOPE, "hooked android.util.Log#" + method);
         } catch (Throwable t) {
             OtaLog.i(SCOPE, "hook unavailable Log#" + method

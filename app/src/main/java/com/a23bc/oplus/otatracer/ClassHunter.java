@@ -41,6 +41,8 @@ public final class ClassHunter {
 
     private static final Set<String> SEEN = Collections.synchronizedSet(new HashSet<>());
     private static final Set<String> HIT_RULES = Collections.synchronizedSet(new HashSet<>());
+    /** Rules that actually got their target methods hooked. */
+    private static final Set<String> SATISFIED = Collections.synchronizedSet(new HashSet<>());
     private static final List<Rule> RULES = Collections.synchronizedList(new ArrayList<>());
 
     private static final Handler MAIN = new Handler(Looper.getMainLooper());
@@ -115,10 +117,14 @@ public final class ClassHunter {
         MAIN.postDelayed(new Runnable() {
             @Override
             public void run() {
-                if (HIT_RULES.contains("SignVerifyUtils")) {
-                    OtaLog.i("Hunter", "deep scan skipped: SignVerifyUtils already resolved");
+                // "Resolved" is not enough: the first run matched only the inner
+                // class SignVerifyUtils$ByteArrayComparator, which has none of the
+                // methods we need. Only a hooked target method counts.
+                if (SATISFIED.contains("SignVerifyUtils")) {
+                    OtaLog.i("Hunter", "deep scan skipped: ecdsaSignPki already hooked");
                     return;
                 }
+                OtaLog.i("Hunter", "deep scan starting: ecdsaSignPki not hooked yet");
                 new Thread(new Runnable() {
                     @Override
                     public void run() {
@@ -241,22 +247,39 @@ public final class ClassHunter {
                 continue;
             }
             candidates++;
-            Class<?> c;
-            try {
-                c = Class.forName(cn, false, cl);
-            } catch (Throwable t) {
-                OtaLog.i("Hunter", "candidate load failed " + cn
-                        + " (" + t.getClass().getSimpleName() + ")");
-                continue;
-            }
-            for (Rule r : new ArrayList<>(RULES)) {
-                if (matches(r, c)) {
-                    deliver(r, c, "keyword");
-                }
-            }
+            consider(cn, cl, "keyword");
             sleepQuietly(TracerConfig.SCAN_YIELD_MS);
         }
         OtaLog.i("Hunter", "keyword scan done scanned=" + scanned + " candidates=" + candidates);
+    }
+
+    /**
+     * Try a class, and if it is an inner class also its outer one. The dex scan
+     * once found only SignVerifyUtils$ByteArrayComparator and missed the real
+     * SignVerifyUtils.
+     */
+    private static void consider(String cn, ClassLoader cl, String via) {
+        tryClass(cn, cl, via);
+        int dollar = cn.indexOf('$');
+        if (dollar > 0) {
+            tryClass(cn.substring(0, dollar), cl, via + "-outer");
+        }
+    }
+
+    private static void tryClass(String cn, ClassLoader cl, String via) {
+        Class<?> c;
+        try {
+            c = Class.forName(cn, false, cl);
+        } catch (Throwable t) {
+            OtaLog.i("Hunter", "candidate load failed " + cn
+                    + " (" + t.getClass().getSimpleName() + ")");
+            return;
+        }
+        for (Rule r : new ArrayList<>(RULES)) {
+            if (matches(r, c)) {
+                deliver(r, c, via);
+            }
+        }
     }
 
     /**
@@ -391,21 +414,31 @@ public final class ClassHunter {
 
     // ------------------------------------------------------------------ hooks
 
-    /** Hook every overload of a named method; never modifies the invocation. */
-    public static void hookAllByName(Class<?> clazz,
-                                     String methodName,
-                                     XC_MethodHook callback,
-                                     String scope) {
+    /** Called by a tracer once its target methods are really hooked. */
+    public static void markSatisfied(String ruleName) {
+        SATISFIED.add(ruleName);
+    }
+
+    /**
+     * Hook every overload of a named method; never modifies the invocation.
+     * Returns the number of hooked overloads.
+     */
+    public static int hookAllByName(Class<?> clazz,
+                                    String methodName,
+                                    XC_MethodHook callback,
+                                    String scope) {
         try {
             Set<XC_MethodHook.Unhook> hooks = XposedBridge.hookAllMethods(clazz, methodName, callback);
             if (hooks.isEmpty()) {
                 OtaLog.i(scope, "no method named " + methodName + " on " + clazz.getName());
-                return;
+                return 0;
             }
             OtaLog.i(scope, "hooked " + methodName + " overloads=" + hooks.size()
                     + " on " + clazz.getName());
+            return hooks.size();
         } catch (Throwable t) {
             OtaLog.err(scope, "hook " + methodName + " failed on " + clazz.getName(), t);
+            return 0;
         }
     }
 

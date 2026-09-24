@@ -13,8 +13,15 @@ public final class TracerConfig {
 
     // ---------------------------------------------------------------- classes
 
-    /** Guessed FQCNs for the signing helper; obfuscated builds fall back to scanning. */
+    /**
+     * Guessed FQCNs for the signing helper; obfuscated builds fall back to scanning.
+     * The com.oplus.ota.downloader.* entries come from a real trace: the dex scan
+     * found com.oplus.ota.downloader.util.SignVerifyUtils$ByteArrayComparator,
+     * which pins the outer class name.
+     */
     public static final String[] SIGN_VERIFY_CLASS_CANDIDATES = {
+            "com.oplus.ota.downloader.util.SignVerifyUtils",
+            "com.oplus.ota.downloader.SignVerifyUtils",
             "com.oplus.ota.utils.SignVerifyUtils",
             "com.oplus.ota.common.utils.SignVerifyUtils",
             "com.oplus.ota.util.SignVerifyUtils",
@@ -25,6 +32,9 @@ public final class TracerConfig {
     };
 
     public static final String[] GET_INFO_THREAD_CANDIDATES = {
+            "com.oplus.ota.downloader.GetInfoThread",
+            "com.oplus.ota.downloader.thread.GetInfoThread",
+            "com.oplus.ota.downloader.util.GetInfoThread",
             "com.oplus.ota.module.GetInfoThread",
             "com.oplus.ota.thread.GetInfoThread",
             "com.oplus.ota.net.GetInfoThread",
@@ -33,6 +43,7 @@ public final class TracerConfig {
     };
 
     public static final String[] DOWNLOAD_EXCEPTION_CANDIDATES = {
+            "com.oplus.ota.downloader.DownloadException",
             "com.oplus.ota.exception.DownloadException",
             "com.oplus.ota.common.exception.DownloadException",
             "com.oplus.ota.net.DownloadException",

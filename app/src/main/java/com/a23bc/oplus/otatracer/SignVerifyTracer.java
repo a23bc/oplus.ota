@@ -49,13 +49,20 @@ public final class SignVerifyTracer {
     private static void attach(Class<?> clazz) {
         OtaLog.i(SCOPE, "attach class=" + clazz.getName());
 
+        int hooked = 0;
         for (String method : TracerConfig.SIGN_VERIFY_METHODS) {
             if ("ecdsaSignPki".equals(method) || "ecdsaSign".equals(method)
                     || "signPki".equals(method)) {
-                ClassHunter.hookAllByName(clazz, method, new SignCallback(method), SCOPE);
+                hooked += ClassHunter.hookAllByName(clazz, method, new SignCallback(method), SCOPE);
             } else {
-                ClassHunter.hookAllByName(clazz, method, new TypeCallback(method), SCOPE);
+                hooked += ClassHunter.hookAllByName(clazz, method, new TypeCallback(method), SCOPE);
             }
+        }
+        if (hooked > 0) {
+            ClassHunter.markSatisfied("SignVerifyUtils");
+        } else {
+            OtaLog.i(SCOPE, "no target method on " + clazz.getName()
+                    + " - keeping the deep scan armed");
         }
     }
 

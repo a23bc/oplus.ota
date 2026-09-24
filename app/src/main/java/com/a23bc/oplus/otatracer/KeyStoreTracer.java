@@ -83,7 +83,9 @@ public final class KeyStoreTracer {
                         if (a instanceof char[]) {
                             sb.append("char[").append(((char[]) a).length).append("]");
                         } else if (a instanceof String) {
-                            sb.append("String(len=").append(((String) a).length()).append(")");
+                            // Alias / KeyStore type: an identifier, not key material.
+                            // Passwords stay unprinted (char[] above).
+                            sb.append("\"").append(OtaLog.safeMsg((String) a)).append("\"");
                         } else {
                             sb.append(OtaLog.describe(a));
                         }

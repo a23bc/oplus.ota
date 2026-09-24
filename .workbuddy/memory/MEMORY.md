@@ -17,6 +17,9 @@ supports this key: (null)` 及后续 `DownloadException` / `responseCode=2304`�
 - **不做全包方法 hook**：只 hook 具名入口；GetInfoThread 每类上限 12 个方法；
   共享类（KeyStore / HttpURLConnection / Log）带调用栈过滤。
 - **安全失败**：找不到类/方法只记录一次，绝不让 OTA App 崩溃。
+- **绝不 hook 类加载路径**（`ClassLoader#loadClass` 等），更不能在回调里做反射
+  （`getDeclaredMethods()` / `Class.forName`）。首版这么干过：启动期嵌套类加载 →
+  应用 ClassLoader 损坏 → `:ui` 进程黑屏。所有反射只在后台线程做，且限流。
 
 ## 工作流约束（用户既有习惯）
 
