@@ -150,6 +150,7 @@ public final class TracerConfig {
      */
     public static final String[] ATTESTATION_CLASSES = {
             "com.allawn.cryptography.security.attestation.AttestationUtil",
+            "com.allawn.cryptography.security.attestation.AttestationManager",
     };
 
     /**

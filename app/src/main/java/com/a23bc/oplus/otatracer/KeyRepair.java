@@ -64,6 +64,14 @@ public final class KeyRepair {
         if (alias == null || !isRepairable(alias)) {
             return;
         }
+        // The SDK is about to create the attestation key itself. Yield: a plain EC
+        // key created here would take the alias and leave the certificate without
+        // an attestation extension, which the server rejects. If the SDK ends up
+        // creating nothing, onGetKeyNull() still supplies a key as a fallback.
+        if (AttestationTracer.isSdkGenerating()) {
+            OtaLog.i(SCOPE, "deferring to SDK attestation flow alias=" + alias);
+            return;
+        }
         if (!TRIED.add(alias)) {
             return;
         }

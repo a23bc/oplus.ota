@@ -20,7 +20,20 @@ public final class AttestationTracer {
 
     private static boolean installed = false;
 
+    /**
+     * True while the SDK is inside its own generateX509 path. The repair must
+     * yield then: AttestationManager is about to create the attestation key
+     * itself, and a plain EC key created first would take the alias and leave
+     * the certificate without an attestation extension.
+     */
+    private static final java.util.concurrent.atomic.AtomicInteger GENERATE_DEPTH =
+            new java.util.concurrent.atomic.AtomicInteger();
+
     private AttestationTracer() {
+    }
+
+    public static boolean isSdkGenerating() {
+        return GENERATE_DEPTH.get() > 0;
     }
 
     public static void install(XC_LoadPackage.LoadPackageParam lpparam) {
@@ -50,6 +63,9 @@ public final class AttestationTracer {
         @Override
         protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
             try {
+                if (param.method.getName().startsWith("generate")) {
+                    GENERATE_DEPTH.incrementAndGet();
+                }
                 StringBuilder sb = new StringBuilder(param.method.getName()).append(" enter");
                 Object[] args = param.args;
                 if (args != null) {
@@ -67,6 +83,9 @@ public final class AttestationTracer {
         @Override
         protected void afterHookedMethod(MethodHookParam param) throws Throwable {
             try {
+                if (param.method.getName().startsWith("generate")) {
+                    GENERATE_DEPTH.decrementAndGet();
+                }
                 if (param.hasThrowable()) {
                     OtaLog.i(SCOPE, param.method.getName() + " threw");
                     OtaLog.stack(SCOPE, param.method.getName() + " exception:",
