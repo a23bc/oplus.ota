@@ -197,6 +197,23 @@ public final class TracerConfig {
      */
     public static final boolean ENABLE_VERBOSE_APPLOG = true;
 
+    /**
+     * The attestation flow talks to a CryptoEng HAL service, and the device logs
+     * "cryptoeng_hidl: process com.oplus.ota have no permission calling cmd:10009".
+     * Dump the SDK's own command enum so those numbers mean something.
+     */
+    public static final String[] CRYPTO_CMD_TYPE_CLASSES = {
+            "com.allawn.cryptography.teesdk.type.CryptoEngCmdType",
+            "com.allawn.cryptography.teesdk.type.CryptoengCmdType",
+    };
+
+    /** Class-name keywords for finding the CryptoEng client. */
+    public static final String[] CRYPTO_ENG_KEYWORDS = {"cryptoeng", "cryptoEng"};
+
+    public static final int CRYPTO_ENG_MAX_CLASSES = 6;
+    public static final int CRYPTO_ENG_MAX_METHODS = 10;
+    public static final int CRYPTO_ENG_SCAN_DELAY_MS = 4000;
+
     /** Tags always echoed when verbose logging is on. */
     public static final String[] VERBOSE_LOG_TAGS = {
             "OTAApplication", "Attestation", "allawn", "pki", "Crypto", "GetInfoThread",

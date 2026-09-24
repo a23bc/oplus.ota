@@ -331,6 +331,38 @@ public final class ClassHunter {
         OtaLog.i("Hunter", "deep scan done loaded=" + loaded + " checked=" + checked);
     }
 
+    /**
+     * Load classes whose name contains a keyword (case-insensitive). Used to
+     * reach bundled SDK classes whose exact FQCN is unknown - e.g. the CryptoEng
+     * client that the attestation flow talks to. Run off the main thread.
+     */
+    public static List<Class<?>> findByKeyword(String keyword, int maxClasses) {
+        List<Class<?>> out = new ArrayList<>();
+        ClassLoader cl = appClassLoader;
+        if (cl == null) {
+            return out;
+        }
+        Enumeration<String> names = dexEntries(cl);
+        if (names == null) {
+            return out;
+        }
+        String needle = keyword.toLowerCase();
+        while (names.hasMoreElements() && out.size() < maxClasses && !scanStopped) {
+            String cn = names.nextElement();
+            if (!cn.toLowerCase().contains(needle)) {
+                continue;
+            }
+            try {
+                Class<?> c = Class.forName(cn, false, cl);
+                out.add(c);
+                sleepQuietly(TracerConfig.SCAN_YIELD_MS);
+            } catch (Throwable ignored) {
+                // Unresolvable class, skip.
+            }
+        }
+        return out;
+    }
+
     private static Enumeration<String> dexEntries(ClassLoader cl) {
         Object pathList;
         try {

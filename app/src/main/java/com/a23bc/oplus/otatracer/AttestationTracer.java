@@ -1,5 +1,11 @@
 package com.a23bc.oplus.otatracer;
 
+import android.os.Handler;
+import android.os.Looper;
+
+import java.lang.reflect.Method;
+import java.util.List;
+
 import de.robv.android.xposed.XC_MethodHook;
 import de.robv.android.xposed.XposedHelpers;
 import de.robv.android.xposed.callbacks.XC_LoadPackage;
@@ -36,11 +42,14 @@ public final class AttestationTracer {
         return GENERATE_DEPTH.get() > 0;
     }
 
+    private static volatile ClassLoader appCl;
+
     public static void install(XC_LoadPackage.LoadPackageParam lpparam) {
         if (installed) {
             return;
         }
         installed = true;
+        appCl = lpparam.classLoader;
         for (String fqcn : TracerConfig.ATTESTATION_CLASSES) {
             Class<?> c;
             try {
@@ -56,6 +65,94 @@ public final class AttestationTracer {
             ClassHunter.hookAllDeclaredMethods(c, new AttestCallback(), SCOPE,
                     TracerConfig.MAX_METHODS_PER_CLASS);
         }
+
+        dumpCmdTypes();
+        scheduleCryptoEngScan();
+    }
+
+    /**
+     * The HIDL service logs "have no permission calling cmd:10009" - find out
+     * which command that is by dumping the SDK's own command enum.
+     */
+    private static void dumpCmdTypes() {
+        for (String fqcn : TracerConfig.CRYPTO_CMD_TYPE_CLASSES) {
+            try {
+                Class<?> c = Class.forName(fqcn, false, appCl);
+                Object[] constants = c.getEnumConstants();
+                if (constants == null) {
+                    OtaLog.i(SCOPE, "cmd type " + fqcn + " is not an enum");
+                    continue;
+                }
+                StringBuilder sb = new StringBuilder("cmdTypes ");
+                for (Object o : constants) {
+                    Integer code = readIntCode(o);
+                    if (sb.length() > 0) {
+                        sb.append(' ');
+                    }
+                    sb.append(o).append('=').append(code == null ? "?" : code);
+                }
+                OtaLog.i(SCOPE, sb.toString());
+            } catch (Throwable t) {
+                OtaLog.i(SCOPE, "no cmd type " + fqcn + " (" + t.getClass().getSimpleName() + ")");
+            }
+        }
+    }
+
+    /** Read an int code off an enum constant: try the usual getters, then fields. */
+    private static Integer readIntCode(Object constant) {
+        for (String getter : new String[]{"getCode", "getValue", "getCmd", "getIntValue"}) {
+            try {
+                Method m = constant.getClass().getMethod(getter);
+                Object v = m.invoke(constant);
+                if (v instanceof Integer) {
+                    return (Integer) v;
+                }
+            } catch (Throwable ignored) {
+                // Try the next one.
+            }
+        }
+        for (java.lang.reflect.Field f : constant.getClass().getDeclaredFields()) {
+            if (f.getType() == int.class && !f.isSynthetic()) {
+                try {
+                    f.setAccessible(true);
+                    return (Integer) f.get(constant);
+                } catch (Throwable ignored) {
+                    // Try the next one.
+                }
+            }
+        }
+        return null;
+    }
+
+    /**
+     * The CryptoEng client class name is unknown, so find it by keyword in the
+     * background and hook it - that is where "Cryptoeng Service return fail"
+     * originates.
+     */
+    private static void scheduleCryptoEngScan() {
+        new Handler(Looper.getMainLooper()).postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                new Thread(new Runnable() {
+                    @Override
+                    public void run() {
+                        try {
+                            for (String keyword : TracerConfig.CRYPTO_ENG_KEYWORDS) {
+                                List<Class<?>> found = ClassHunter.findByKeyword(keyword,
+                                        TracerConfig.CRYPTO_ENG_MAX_CLASSES);
+                                for (Class<?> c : found) {
+                                    OtaLog.i(SCOPE, "cryptoeng candidate " + c.getName());
+                                    ClassHunter.hookAllDeclaredMethods(c, new AttestCallback(),
+                                            SCOPE, TracerConfig.CRYPTO_ENG_MAX_METHODS);
+                                }
+                            }
+                        } catch (Throwable t) {
+                            OtaLog.err(SCOPE, "cryptoeng scan failed", t);
+                        }
+                    }
+                }, "OtaTracer-cryptoeng").start();
+            }
+        }, TracerConfig.CRYPTO_ENG_SCAN_DELAY_MS);
     }
 
     private static final class AttestCallback extends XC_MethodHook {
