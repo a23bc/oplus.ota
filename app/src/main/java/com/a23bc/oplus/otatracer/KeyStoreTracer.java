@@ -58,7 +58,7 @@ public final class KeyStoreTracer {
                 java.security.spec.AlgorithmParameterSpec.class, java.security.SecureRandom.class);
         hook(java.security.KeyPairGenerator.class, "initialize", int.class,
                 java.security.SecureRandom.class);
-        hook(java.security.KeyGenerator.class, "generateKey");
+        hook(javax.crypto.KeyGenerator.class, "generateKey");
         hook(java.security.KeyStore.class, "setEntry", String.class,
                 java.security.KeyStore.Entry.class,
                 java.security.KeyStore.ProtectionParameter.class);
