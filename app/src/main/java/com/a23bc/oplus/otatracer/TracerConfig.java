@@ -142,6 +142,17 @@ public final class TracerConfig {
     };
 
     /**
+     * The PKI SDK's attestation helper, seen in the getKey() stack:
+     *   com.allawn...AttestationUtil.deleteKeyIfExists
+     *   com.allawn...AttestationUtil.createApplicationPublicKey
+     * It is not obfuscated, so it can be watched directly. Whatever it does (or
+     * silently fails to do) explains why no attestation key ever existed.
+     */
+    public static final String[] ATTESTATION_CLASSES = {
+            "com.allawn.cryptography.security.attestation.AttestationUtil",
+    };
+
+    /**
      * Library prefixes, used to tell app code from bundled dependencies when the
      * class name alone cannot (obfuscated top-level packages like u7.a).
      */
