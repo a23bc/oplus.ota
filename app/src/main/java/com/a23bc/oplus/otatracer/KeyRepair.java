@@ -5,6 +5,7 @@ import android.security.keystore.KeyProperties;
 
 import de.robv.android.xposed.XC_MethodHook;
 
+import java.security.Key;
 import java.security.KeyPair;
 import java.security.KeyPairGenerator;
 import java.security.KeyStore;
