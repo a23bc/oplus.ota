@@ -2,6 +2,16 @@
 
 `com.oplus.ota` 下载流程的**纯诊断** LSPosed 模块。
 
+> **调查已结案。** 完整结论、源码级链路、被推翻的判断、可复现命令，见
+> [`ANALYSIS.md`](ANALYSIS.md)。
+>
+> 结论摘要：客户端代码没有问题，`2713` 是服务端业务码（APK 内零定义）；
+> 失败的一环在设备完整性 —— `packIdAttestation()` 恒 false、CryptoEng HAL 返回 fail。
+>
+> 下面「诊断结论」「修复模式」两节描述的是**早期 2304 阶段**，已被后续轮次推翻，
+> 保留仅作历史记录。修复开关 `ENABLE_KEY_REPAIR` / `ENABLE_KEY_INJECT` 自 r14 起
+> 已置 `false`（r11 实测证明它在当前链路上全程空转）。
+
 点击「下载内部测试包」后出现
 
 ```
@@ -204,15 +214,39 @@ CI 流程：下载 Gradle 8.2 + runner 自带 Android SDK → 只读性 grep 检
 
 ```
 app/src/main/java/com/a23bc/oplus/otatracer/
-  HookEntry.java              入口，包过滤
-  OtaLog.java                 统一 TAG + 脱敏 + 分块
-  TracerConfig.java           目标类名 / 方法名 / 关键词
-  ClassHunter.java            类定位（FQCN / loadClass / dex 扫描）
-  SignVerifyTracer.java       SignVerifyUtils
-  GetInfoThreadTracer.java    GetInfoThread
-  DownloadExceptionTracer.java DownloadException
-  ResponseCodeTracer.java     响应码来源
-  KeyStoreTracer.java         KeyStore / AndroidKeyStore 参与情况
-  SpTracer.java               gakReqSpValue 上下文
-  LogTracer.java              App 自身日志回声
+  HookEntry.java                入口，包过滤
+  OtaLog.java                   统一 TAG + 脱敏 + 分块
+  TracerConfig.java             目标类名 / 方法名 / 关键词 / 开关
+  ClassHunter.java              类定位（FQCN / 关键词 / 简单类名，后台线程）
+  SignVerifyTracer.java         SignVerifyUtils（com.oplus.ota.downloader.util.b）
+  GetInfoThreadTracer.java      GetInfoThread（u7.a）
+  DownloadExceptionTracer.java  DownloadException 构造点
+  ResponseCodeTracer.java       响应码来源 + URL 脱敏（safeUrl）
+  KeyStoreTracer.java           KeyStore / AndroidKeyStore 参与情况
+  KeyRepair.java                唯一的 setResult（已关闭，见上方说明）
+  SpTracer.java                 SharedPreferences 读 + 写（含 recruit 相关 key）
+  LogTracer.java                App 自身日志回声
+  ThreadTracer.java             以 class loader 判定"是不是 app 代码"
+  AttestationTracer.java        AttestationUtil / AttestationManager / CryptoEng
+  ParseDiagTracer.java          ResultParser / Util 的判定（r14）
+  DownloadRequestTracer.java    gkaReq=2 下载请求端到端（r15-r18）
+  RecruitTracer.java            内测资格门 D1() + Settings.Global（r19）
+  AttestationStateTracer.java   ParsedAttestationRecord 字段（r20，实测客户端不调用）
 ```
+
+## 两个踩过的坑（写在代码注释里了，这里再提醒一次）
+
+1. **绝不在 hook 里做类加载 / `getDeclaredMethods()`**。早期这么干过：
+   嵌套类加载 → 应用 ClassLoader 损坏 → `:ui` 进程黑屏。
+   `ThreadTracer` 用 class loader 判定 app 代码，也只在 hook 外做。
+
+2. **调用栈过滤器不能只认包名前缀**。`OtaLog.callerIsTargetApp()` 只匹配
+   `com.oplus.ota`，但 `u7.a`、`b7.d`、`p5.b` 这些是**混淆后的顶层包**，栈里
+   一帧 `com.oplus.ota` 都没有。r17 就因为这个把 `/download` 的日志全丢了
+   （`/ts` 却能打出来，因为它由 `com.oplus.ota.downloader.util.b.p()` 发起）。
+   r18 改成 `otaContext()`：栈 / URL / 连接对象三者**取或**。
+
+## 提交
+
+这个仓库**不要用 `git add -A`**：根目录下有 `decompiled/`（约 9500 个 jadx 文件）
+和导入的聊天记录 md。已加进 `.gitignore`，但提交时仍要显式列路径。

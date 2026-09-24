@@ -79,6 +79,40 @@ L78-81 → addRequestProperty: id / ts / ac / as
 
 `u7/a.java:69-73`：gka 头只在 `b.i(ctx)∈{1,2}` **且** `DownloadRequest.mDownloadType(w)∈{0,1}` 时才加。
 
+## 2713 的定性（r19 实测定稿：服务端明确判 false）
+
+r19 实测（hook `n5.h.D1` + SharedPreferences 读写 + Settings.Global）：
+```
+D1 recruited=false                              （"是否内测设备"的门）
+putBoolean is_recruit=false ×2                  ← 服务端响应解析后写入
+putString  recruitType = "" ×2                  ← 同上
+getString  recordOtaRecruitAid = null（恒）
+putString  recordOtaRecruitAid 出现 0 次        ← 从未收到招募成功广播
+```
+**`is_recruit=false` / `recruitType=""` 是服务端主动下发的，不是本地默认值、
+不是客户端没存住。** 所以 OTA 全程走非内测通道 → 下发 `taste=0` 的 URL →
+`/download` 回 2713。
+
+**客户端代码已逐项验证正确，改客户端无意义。**
+这是服务端/招募平台的资格状态问题，与社区"更新前置包后资格消失"同一现象，
+**单机无解**，只能向 OPPO 反馈（附上面这段可复现证据）。
+
+## 2713 的定性（2026-09-24 r18 日志实测 + 源码，结论已闭环）
+
+**客户端侧已全部验证通过，2713 是服务端业务码。** 实测证据（r18.log）：
+
+```
+guid len=64（非空）  tsUsed == tsBody（来自 /ts，无回退）
+header id / ts / ac(len=3204) / as(len=96) 四个齐全，b.a 无异常
+download httpStatus=200 / realHttpStatus=200 / streamVia=getInputStream
+download body={"body":null,"errMsg":"2713","responseCode":2713}
+mCode=2 (EXCEPTION_SERVER_SUPPORT_CODE) mGKACode=2713
+```
+
+注意 **206 才是成功路径，200 就是拒绝**（`u7/a.java:79`）。服务端连包体都没开始发。
+**再改客户端没有意义。** 下一步做对照实验：同设备下一个非内测的普通 OTA 包，
+能下 → 2713 针对这个内测包（资格/白名单）；也 2713 → 设备/账号层级。
+
 ## 2713 的定性（2026-09-24 只读源码分析，结论性）
 
 **APK 内没有 2713 的任何定义/映射/文案。** 全树零命中。
@@ -106,7 +140,27 @@ L78-81 → addRequestProperty: id / ts / ac / as
 grep 门禁依旧通过）、**不跳过签名**，服务端照常验签。只补缺失的密钥材料。
 能否下载成功取决于服务端是否接受新密钥的证书；若换别的错误码（非 2304）即为下一判据。
 
+## 调用栈过滤器不能只认包名前缀（r17 实测踩到）
+
+`OtaLog.callerIsTargetApp()` 只匹配 `com.oplus.ota` 字面前缀。
+但 OTA 大量代码在**混淆后的顶层包**（`u7.a`=GetInfoThread、`b7.d`、`p5.b`、`z6.b`…），
+它们的调用栈里一帧 `com.oplus.ota` 都没有。
+
+后果（r17 实测）：`/download` 的 getResponseCode / getInputStream / body **一条都没打出来**，
+而 `/ts` 正常 —— 因为 /ts 由 `com.oplus.ota.downloader.util.b.p()` 发起，前缀能匹配。
+看起来像"服务端没响应"，其实是我自己的过滤器把它丢了。
+
+**规矩**：判定"这是不是 OTA 自己的调用"时，包名前缀只能作为**多个信号之一取或**，
+不能单独作为闸门。DownloadRequestTracer 里统一用 `otaContext(url, conn)`：
+栈有 com.oplus.ota **或** URL 指向 OTA 后端 **或** 就是 b.a(..,2) 那个连接对象。
+并且**绝不在 hook 里用 Class.forName 解析栈帧**来判定归属（会搞坏 class loader → :ui 黑屏）。
+
 ## 工作流约束（用户既有习惯）
+
+- **永远不要用 `git add -A`**（这个仓库内）。仓库根有 `decompiled/`（9465 个 jadx
+  文件 + 资源）和 0.4MB 的导入聊天记录，`-A` 会一次性全卷进来。
+  已写进 `.gitignore`（`decompiled/`、`/*.log`、`分析内测包提取.md`），
+  但提交时仍要**显式列路径**。2026-09-24 踩过一次，push 被打断才没污染远端。
 
 - 本机不跑 Gradle（无 Android SDK）：改代码 → 推分支 → `gh run watch` → 真机装机验证。
 - 分支名不能用斜杠（本机 git 写不了带斜杠的 ref）；commit/push 要在非沙箱模式下执行。

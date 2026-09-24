@@ -19,6 +19,9 @@ decompiled/
 # Root-level adb logs
 /*.log
 
+# adb binary kept at the repo root
+/adb
+
 # Chat log imported from another assistant; 0.4MB of prose.
 # git add -f it if you want it tracked.
 分析内测包提取.md
