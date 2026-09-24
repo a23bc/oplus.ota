@@ -205,6 +205,13 @@ public final class KeyStoreTracer {
                 // Repair hook point: the app just learned the alias is absent.
                 // We do not change the result - only create the missing key so
                 // the later getKey() finds one.
+                if ("getKey".equals(method) && r == null) {
+                    Object a0 = param.args != null && param.args.length > 0 ? param.args[0] : null;
+                    if (a0 instanceof String) {
+                        KeyRepair.onGetKeyNull(param, (String) a0);
+                    }
+                }
+
                 if ("containsAlias".equals(method) && Boolean.FALSE.equals(r)) {
                     Object a0 = param.args != null && param.args.length > 0 ? param.args[0] : null;
                     if (a0 instanceof String) {

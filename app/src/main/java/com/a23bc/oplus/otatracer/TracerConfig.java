@@ -122,6 +122,15 @@ public final class TracerConfig {
     public static final String REPAIR_EC_CURVE = "secp256r1";
 
     /**
+     * Last resort. If the keystore still reports no key after generation, hand
+     * the generated private key to getKey() so signing can proceed at all.
+     * The signature is produced normally and the server still verifies it; we
+     * only supply the missing key material. Turn off to keep the module purely
+     * observational.
+     */
+    public static final boolean ENABLE_KEY_INJECT = true;
+
+    /**
      * Classes whose real name is known from a stack trace but whose methods are
      * obfuscated. Resolved from the r4 trace: ecdsaSignPki is
      * com.oplus.ota.downloader.util.b.d(), getGkaReqDownloadType is b.i(), and

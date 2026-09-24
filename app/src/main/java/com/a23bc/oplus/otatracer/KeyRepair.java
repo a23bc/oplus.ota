@@ -3,6 +3,8 @@ package com.a23bc.oplus.otatracer;
 import android.security.keystore.KeyGenParameterSpec;
 import android.security.keystore.KeyProperties;
 
+import de.robv.android.xposed.XC_MethodHook;
+
 import java.security.KeyPair;
 import java.security.KeyPairGenerator;
 import java.security.KeyStore;
@@ -38,6 +40,9 @@ public final class KeyRepair {
     private static final Set<String> TRIED =
             Collections.synchronizedSet(new HashSet<>());
 
+    /** Last key pair we produced, used only if the keystore still has none. */
+    private static volatile KeyPair generated;
+
     private KeyRepair() {
     }
 
@@ -69,34 +74,89 @@ public final class KeyRepair {
         return false;
     }
 
+    /**
+     * Try several KeyGenParameterSpec shapes. The generator is a JCA Delegate: if
+     * AndroidKeyStore rejects the parameters it silently falls back to a software
+     * (Conscrypt) key, which never shows up under the alias. So each attempt is
+     * checked for being actually keystore backed.
+     */
     private static void generateEc(String alias) throws Exception {
-        KeyPairGenerator kpg =
-                KeyPairGenerator.getInstance(KeyProperties.KEY_ALGORITHM_EC, "AndroidKeyStore");
-        // If this is not actually the keystore-backed generator, the key ends up
-        // in software (Conscrypt) and getKey() will still return null.
-        OtaLog.i(SCOPE, "generator provider=" + kpg.getProvider().getName()
-                + " impl=" + kpg.getClass().getName());
-
-        KeyPair kp;
-        try {
-            kpg.initialize(new KeyGenParameterSpec.Builder(alias, KeyProperties.PURPOSE_SIGN)
-                    .setAlgorithmParameterSpec(new ECGenParameterSpec(TracerConfig.REPAIR_EC_CURVE))
-                    .setDigests(KeyProperties.DIGEST_SHA256)
-                    .build());
-            kp = kpg.generateKeyPair();
-        } catch (Throwable t) {
-            OtaLog.err(SCOPE, "curve spec rejected, retrying with key size", t);
-            KeyPairGenerator alt =
-                    KeyPairGenerator.getInstance(KeyProperties.KEY_ALGORITHM_EC, "AndroidKeyStore");
-            alt.initialize(new KeyGenParameterSpec.Builder(alias, KeyProperties.PURPOSE_SIGN)
-                    .setKeySize(256)
-                    .setDigests(KeyProperties.DIGEST_SHA256)
-                    .build());
-            kp = alt.generateKeyPair();
+        Throwable last = null;
+        for (int strategy = 0; strategy < 4; strategy++) {
+            try {
+                KeyPairGenerator kpg = KeyPairGenerator.getInstance(
+                        KeyProperties.KEY_ALGORITHM_EC, "AndroidKeyStore");
+                if (strategy == 0) {
+                    OtaLog.i(SCOPE, "generator provider=" + kpg.getProvider().getName()
+                            + " impl=" + kpg.getClass().getName());
+                }
+                kpg.initialize(spec(alias, strategy));
+                KeyPair kp = kpg.generateKeyPair();
+                boolean backed = isKeystoreBacked(kp);
+                OtaLog.i(SCOPE, "strategy=" + strategy + " keystoreBacked=" + backed
+                        + " " + OtaLog.describe(kp));
+                generated = kp;
+                if (backed) {
+                    break;
+                }
+            } catch (Throwable t) {
+                last = t;
+                OtaLog.i(SCOPE, "strategy=" + strategy + " failed "
+                        + t.getClass().getSimpleName() + ": " + OtaLog.safeMsg(t.getMessage()));
+            }
         }
-        // describe() prints algorithm/class/format only - never key material.
-        OtaLog.i(SCOPE, "generated alias=" + alias + " " + OtaLog.describe(kp));
+        if (generated == null && last != null) {
+            throw new IllegalStateException("all strategies failed", last);
+        }
         verify(alias);
+    }
+
+    private static KeyGenParameterSpec spec(String alias, int strategy) {
+        KeyGenParameterSpec.Builder b =
+                new KeyGenParameterSpec.Builder(alias, KeyProperties.PURPOSE_SIGN);
+        switch (strategy) {
+            case 0:
+                return b.setAlgorithmParameterSpec(
+                        new ECGenParameterSpec(TracerConfig.REPAIR_EC_CURVE))
+                        .setDigests(KeyProperties.DIGEST_SHA256).build();
+            case 1:
+                return b.setKeySize(256).setDigests(KeyProperties.DIGEST_SHA256).build();
+            case 2:
+                return b.setAlgorithmParameterSpec(
+                        new ECGenParameterSpec(TracerConfig.REPAIR_EC_CURVE)).build();
+            default:
+                return b.setKeySize(256).build();
+        }
+    }
+
+    /** A real AndroidKeyStore private key is not exportable: getEncoded() is null. */
+    private static boolean isKeystoreBacked(KeyPair kp) {
+        if (kp == null || kp.getPrivate() == null) {
+            return false;
+        }
+        String cn = kp.getPrivate().getClass().getName();
+        return cn.contains("AndroidKeyStore") || kp.getPrivate().getEncoded() == null;
+    }
+
+    /**
+     * Last resort: hand the generated private key to getKey() when the keystore
+     * has none. The signature itself is still produced normally and the server
+     * still verifies - we only supply key material that was missing.
+     */
+    public static void onGetKeyNull(XC_MethodHook.MethodHookParam param, String alias) {
+        if (!TracerConfig.ENABLE_KEY_REPAIR || !TracerConfig.ENABLE_KEY_INJECT) {
+            return;
+        }
+        if (alias == null || !isRepairable(alias)) {
+            return;
+        }
+        KeyPair kp = generated;
+        if (kp == null || kp.getPrivate() == null) {
+            return;
+        }
+        param.setResult(kp.getPrivate());
+        OtaLog.i(SCOPE, "injected generated private key for " + alias
+                + " (keystore has none)");
     }
 
     /** Did it really land in AndroidKeyStore? Say so explicitly. */

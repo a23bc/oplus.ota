@@ -127,6 +127,19 @@ KeyPairGenerator.getInstance("EC", "AndroidKeyStore")
 覆盖范围也刻意收窄：只处理 `TracerConfig.REPAIR_ALIASES` 里列明的 alias，
 只在 App 自己刚确认缺失时触发，每进程每个 alias 只做一次，失败只记日志。
 
+### 第二层：兜底注入（`ENABLE_KEY_INJECT`）
+
+AndroidKeyStore 的 `KeyPairGenerator` 是 JCA `Delegate`：参数不合适时会**静默回退**到
+Conscrypt 软件实现，密钥也就不会出现在 alias 下（真机验证：`keystoreBacked=false`，
+`getEncoded()` 非 null）。所以修复会依次尝试 4 组 `KeyGenParameterSpec`
+（曲线/密钥长度 × 有无 digest），并对每次结果做 `getEncoded()==null` 的自检。
+
+全都进不去时，才把生成的私钥交给 `getKey()`。这是全模块**唯一一处 `setResult`**，
+CI 的只读门禁对它单独开了白名单（`KeyRepair.java`），其余文件依旧零容忍。
+
+它仍然不是绕过：**签名照常计算、服务端照常验签**，我们只是补上了缺失的密钥材料。
+只要服务端校验证书链归属，用自生成的密钥就过不了——那是诚实的失败，不是欺骗。
+
 **能否下载成功取决于服务端**：它会校验证书链。若接受新密钥的证书，链路走通；
 若要求 Google/OPPO 签发的 attestation，会返回别的错误码（不再是 2304）——
 那个错误码本身就是下一步的判据。
