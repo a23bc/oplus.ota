@@ -76,6 +76,8 @@ public final class TracerConfig {
     public static final String[] LOG_MSG_HINTS = {
             "download denied", "ecdsasignpki", "gkareq", "responsecode", "errormsg",
             "downloadexception", "signverify", "2304",
+            "recruittype", "tastemode", "recruitid", "received recruit",
+            "cancel appointment", "clear the ota update data",
     };
 
     public static final String[] LOG_TAG_HINTS = {
@@ -303,9 +305,42 @@ public final class TracerConfig {
      */
     public static final String MD5_OF_EMPTY = "d41d8cd98f00b204e9800998ecf8427e";
 
+    // ------------------------------------------------- r19: 内测资格状态观察
+    //
+    // Whether the server still considers this device recruited. The client cannot
+    // answer that, only observe what the server's own fields land as.
+    //
+    // Anchor facts (all verified in source):
+    //   n5/h.java:311      D1(ctx) = !isEmpty(Settings.Global "recordOtaRecruitAid")
+    //                      -> the "am I an internal-test device" gate
+    //   h0.java:944,1198   recruitType / is_recruit come from the query response JSON
+    //   StrategyReceiver   writes recordOtaRecruitAid only on
+    //                      oplus.intent.action.ACTION_OTA_RECRUIT_SUCCESS
+    //   v7/a.java:406/438/1891  clear it to null after a successful update
+    //
+    // Pure observation. Nothing here writes a preference or a setting.
+
+    /** SharedPreferences keys whose value decides the internal-test path. */
+    public static final String[] RECRUIT_SP_KEYS = {
+            "is_recruit", "recruittype", "recruit_account", "newtastesotaversion",
+            "recruit_aid", "recruit_status", "alpha_recruit", "taste",
+            "new_version_type", "shelf_has_update",
+    };
+
+    /** Settings.Global keys to watch. */
+    public static final String[] RECRUIT_SETTINGS_KEYS = {
+            "recordOtaRecruitAid", "com.oplus.ota.component_update_url",
+    };
+
+    /** The gate method: n5.h.D1(Context) -> "is this a recruited device". */
+    public static final String RECRUIT_GATE_CLASS = "n5.h";
+    public static final String RECRUIT_GATE_METHOD = "D1";
+
     /** Tags always echoed when verbose logging is on. */
     public static final String[] VERBOSE_LOG_TAGS = {
             "OTAApplication", "Attestation", "allawn", "pki", "Crypto", "GetInfoThread",
+            "StrategyReceiver", "OtaAccountUtil", "ResponseParser",
+            "QueryOTAUpdateRunnable", "UpdateResultHelper",
     };
 
     private TracerConfig() {
