@@ -36,6 +36,21 @@ InvalidKeyException。该密钥**App 自己从不生成**（全程零 `generateK
 dex 里的 `...util.SignVerifyUtils` 是空壳（`ClassNotFoundException`）。
 `b.g()` 返回 ~3200B base64 且每次内容不同 → 运行时生成的 CSR/证书请求体。
 
+## 根因链（最终版，2026-09-24 真机验证）
+
+```
+cryptoeng_hidl: process com.oplus.ota have no permission calling cmd:10009 / 10013
+CryptoengManager: commonGetResult: Cryptoeng Service return fail
+  ↓
+AttestationManager.packIdAttestation() -> false ; generateX509() -> null
+  ↓（attestation 数据残缺，但私钥与签名本身没问题：initSign/sign 成功）
+  ↓
+服务端校验证书/attestation -> DownloadException mGKACode=2713
+```
+
+注：早期曾把 2713 解释为"新密钥未向服务端注册"，**该解释不完整，已作废**。
+`sign()` 成功 ≠ attestation 成功。
+
 ## 修复模式（当前工作重点）
 
 `KeyRepair`：hook 点选在 `KeyStore#containsAlias` 返回 `false` 的那一刻生成 EC 密钥对
