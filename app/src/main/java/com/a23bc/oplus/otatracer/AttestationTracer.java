@@ -155,6 +155,10 @@ public final class AttestationTracer {
         }, TracerConfig.CRYPTO_ENG_SCAN_DELAY_MS);
     }
 
+    private static boolean isVoid(java.lang.reflect.Member m) {
+        return m instanceof Method && ((Method) m).getReturnType() == void.class;
+    }
+
     private static final class AttestCallback extends XC_MethodHook {
 
         @Override
@@ -184,13 +188,27 @@ public final class AttestationTracer {
                     GENERATE_DEPTH.decrementAndGet();
                 }
                 if (param.hasThrowable()) {
-                    OtaLog.i(SCOPE, param.method.getName() + " threw");
+                    Throwable th = param.getThrowable();
+                    OtaLog.i(SCOPE, param.method.getName() + " threw ex=" + (th == null
+                            ? "null"
+                            : th.getClass().getName() + ": " + OtaLog.safeMsg(th.getMessage())));
                     OtaLog.stack(SCOPE, param.method.getName() + " exception:",
                             param.getThrowable());
                     return;
                 }
-                OtaLog.i(SCOPE, param.method.getName() + " return "
-                        + OtaLog.describe(param.getResult()));
+                // r14: generate() / generateX509() must be readable as
+                // "did it produce an object at all", so type and null-ness are
+                // spelled out instead of being left inside describe().
+                Object r = param.getResult();
+                StringBuilder sb = new StringBuilder(param.method.getName())
+                        .append(" return ").append(OtaLog.describe(r));
+                if (isVoid(param.method)) {
+                    sb.append(" void=true");
+                } else {
+                    sb.append(" type=").append(r == null ? "null" : r.getClass().getName())
+                            .append(" isNull=").append(r == null);
+                }
+                OtaLog.i(SCOPE, sb.toString());
             } catch (Throwable t) {
                 OtaLog.err(SCOPE, "attest after logging failed", t);
             }

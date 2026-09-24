@@ -28,6 +28,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
 
         // Register what we are looking for first...
         AttestationTracer.install(lpparam);
+        ParseDiagTracer.install(lpparam);
         SignVerifyTracer.install(lpparam);
         GetInfoThreadTracer.install(lpparam);
         DownloadExceptionTracer.install(lpparam);

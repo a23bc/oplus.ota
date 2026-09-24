@@ -363,6 +363,38 @@ public final class ClassHunter {
         return out;
     }
 
+    /**
+     * Load classes whose simple name (the segment after the last '.') equals
+     * {@code simpleName} exactly. Used when the package of a bundled SDK class is
+     * unknown but the class name is. Background thread only.
+     */
+    public static List<Class<?>> findBySimpleName(String simpleName, int maxClasses) {
+        List<Class<?>> out = new ArrayList<>();
+        ClassLoader cl = appClassLoader;
+        if (cl == null) {
+            return out;
+        }
+        Enumeration<String> names = dexEntries(cl);
+        if (names == null) {
+            return out;
+        }
+        while (names.hasMoreElements() && out.size() < maxClasses && !scanStopped) {
+            String cn = names.nextElement();
+            int dot = cn.lastIndexOf('.');
+            String simple = dot < 0 ? cn : cn.substring(dot + 1);
+            if (!simple.equals(simpleName)) {
+                continue;
+            }
+            try {
+                out.add(Class.forName(cn, false, cl));
+                sleepQuietly(TracerConfig.SCAN_YIELD_MS);
+            } catch (Throwable ignored) {
+                // Unresolvable class, skip.
+            }
+        }
+        return out;
+    }
+
     private static Enumeration<String> dexEntries(ClassLoader cl) {
         Object pathList;
         try {

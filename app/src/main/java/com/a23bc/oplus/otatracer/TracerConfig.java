@@ -113,7 +113,19 @@ public final class TracerConfig {
     // it just has a real key to work with. Whether the server accepts the newly
     // generated key's certificate is the open question.
 
-    public static final boolean ENABLE_KEY_REPAIR = true;
+    /**
+     * r14: OFF on purpose. The module must be purely observational again so the
+     * attestation chain can be read without anything of ours in it.
+     *
+     * This does NOT change the flow. r11 proved the repair was already inert:
+     * when containsAlias("ota_pki_attest") returned false the SDK was inside its
+     * own attestation path, so KeyRepair logged "deferring to SDK attestation
+     * flow" and did nothing; the key came from
+     * android.provider.BeandCupClalt.createApplicationPublicKey and getKey()
+     * then returned a real AndroidKeyStoreECPrivateKey. So switching this off
+     * costs no observation and removes the last thing that could inject.
+     */
+    public static final boolean ENABLE_KEY_REPAIR = false;
 
     /** Aliases we are willing to create when the app reports them missing. */
     public static final String[] REPAIR_ALIASES = {"ota_pki_attest"};
@@ -213,6 +225,40 @@ public final class TracerConfig {
     public static final int CRYPTO_ENG_MAX_CLASSES = 6;
     public static final int CRYPTO_ENG_MAX_METHODS = 10;
     public static final int CRYPTO_ENG_SCAN_DELAY_MS = 4000;
+
+    // ------------------------------------------------- r14: parse / verdict chain
+    //
+    // r13 pinned the chain up to the CryptoEng answer:
+    //   pkiCommonAsk() -> byte[2512] -> ??? -> generate() -> generateX509() = null
+    // These three are the checks the SDK runs on that buffer before it decides
+    // the answer is usable. r14 records only their verdict: return type, null-ness,
+    // boolean value, and the exception class+message if one is thrown.
+    // Nothing is rewritten, nothing is injected, no fallback is added.
+
+    /** Guessed FQCNs; the SDK is com.allawn.cryptography.* and unobfuscated. */
+    public static final String[] PARSE_DIAG_CLASS_CANDIDATES = {
+            "com.allawn.cryptography.teesdk.util.ResultParser",
+            "com.allawn.cryptography.teesdk.result.ResultParser",
+            "com.allawn.cryptography.util.ResultParser",
+            "com.allawn.cryptography.ResultParser",
+            "com.allawn.cryptography.teesdk.util.Util",
+            "com.allawn.cryptography.util.Util",
+            "com.allawn.cryptography.teesdk.Util",
+    };
+
+    /** Fallback lookup when the FQCN guesses miss: exact simple-name match. */
+    public static final String[] PARSE_DIAG_SIMPLE_NAMES = {"ResultParser", "Util"};
+
+    /** The only methods hooked by r14. Everything else stays untouched. */
+    public static final String[] PARSE_DIAG_METHODS = {
+            "parse", "isParseSuccess", "isMethodExecuteSuccessV2",
+    };
+
+    public static final int PARSE_DIAG_MAX_CLASSES = 4;
+    public static final int PARSE_DIAG_SCAN_DELAY_MS = 5000;
+
+    /** Caller stacks printed per "this check failed" verdict; keeps volume sane. */
+    public static final int PARSE_DIAG_MAX_VERDICT_STACKS = 12;
 
     /** Tags always echoed when verbose logging is on. */
     public static final String[] VERBOSE_LOG_TAGS = {
