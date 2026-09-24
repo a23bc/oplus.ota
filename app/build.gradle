@@ -1,0 +1,38 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.a23bc.oplus.otatracer'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'com.a23bc.oplus.otatracer'
+        minSdk 27
+        targetSdk 34
+        versionCode 1
+        versionName '1.0'
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            shrinkResources false
+        }
+    }
+
+    lint {
+        abortOnError false
+        checkReleaseBuilds false
+    }
+}
+
+dependencies {
+    // Provided by the host (LSPosed) at runtime, never bundled into the APK.
+    compileOnly 'de.robv.android.xposed:api:82'
+}

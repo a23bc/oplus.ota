@@ -1,0 +1,62 @@
+name: Build
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  assemble:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Gradle 8.2
+        run: |
+          set -e
+          curl -fsSL -o /tmp/gradle.zip https://services.gradle.org/distributions/gradle-8.2-bin.zip
+          unzip -q /tmp/gradle.zip -d /opt
+          echo "/opt/gradle-8.2/bin" >> "$GITHUB_PATH"
+
+      - name: Gradle version
+        run: gradle --version
+
+      - name: Verify hooks are read-only
+        run: |
+          set -e
+          if grep -rnE 'setResult|setThrowable|param\.args\[[0-9]+\] *=' app/src/main/java; then
+            echo "ERROR: tracer must never modify params, results or exceptions"
+            exit 1
+          fi
+          echo "OK: no result/arg/throwable mutation"
+
+      - name: Compile check (debug)
+        run: gradle :app:compileDebugJavaWithJavac --stacktrace
+
+      - name: Assemble release APK
+        run: gradle :app:assembleRelease --stacktrace
+
+      - name: Verify xposed_init is packaged
+        run: |
+          set -e
+          APK=$(ls app/build/outputs/apk/release/*.apk | head -n 1)
+          echo "apk=$APK"
+          unzip -l "$APK" | grep -E 'assets/xposed_init' || {
+            echo "assets/xposed_init missing from APK"; exit 1; }
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: oplus-ota-tracer-release
+          path: app/build/outputs/apk/release/*.apk

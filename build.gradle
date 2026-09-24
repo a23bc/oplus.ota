@@ -1,0 +1,9 @@
+// Root project: no build logic here beyond plugin declaration.
+// Android Gradle Plugin version is pinned so CI and local builds agree.
+plugins {
+    id 'com.android.application' version '8.1.4' apply false
+}
+
+tasks.register('clean', Delete) {
+    delete rootProject.layout.buildDirectory
+}
