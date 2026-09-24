@@ -98,10 +98,20 @@ public final class LogTracer {
                 String lowMsg = msg.toLowerCase();
 
                 boolean tagHit = false;
-                for (String hint : TracerConfig.LOG_TAG_HINTS) {
-                    if (lowTag.contains(hint)) {
-                        tagHit = true;
-                        break;
+                if (TracerConfig.ENABLE_VERBOSE_APPLOG) {
+                    for (String t : TracerConfig.VERBOSE_LOG_TAGS) {
+                        if (lowTag.contains(t.toLowerCase())) {
+                            tagHit = true;
+                            break;
+                        }
+                    }
+                }
+                if (!tagHit) {
+                    for (String hint : TracerConfig.LOG_TAG_HINTS) {
+                        if (lowTag.contains(hint)) {
+                            tagHit = true;
+                            break;
+                        }
                     }
                 }
                 boolean msgHit = false;

@@ -190,6 +190,18 @@ public final class TracerConfig {
     /** Cap on echoed app log lines per second (Log is a very hot method). */
     public static final int LOG_ECHO_MAX_PER_SEC = 25;
 
+    /**
+     * Diagnostic: echo every line from the OTA / PKI tags instead of only the
+     * keyword matches. Noisy, but it is the only way to see the context the app
+     * itself prints around a server error code like 2713.
+     */
+    public static final boolean ENABLE_VERBOSE_APPLOG = true;
+
+    /** Tags always echoed when verbose logging is on. */
+    public static final String[] VERBOSE_LOG_TAGS = {
+            "OTAApplication", "Attestation", "allawn", "pki", "Crypto", "GetInfoThread",
+    };
+
     private TracerConfig() {
     }
 }
