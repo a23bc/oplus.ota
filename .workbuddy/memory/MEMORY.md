@@ -2,9 +2,12 @@
 
 ## 项目性质
 
-`com.oplus.ota`（OPPO/一加 OTA）下载流程的**纯诊断** LSPosed 模块。
+`com.oplus.ota`（OPPO/一加 OTA）下载流程的诊断 + 修复 LSPosed 模块。
 目标问题：点击「下载内部测试包」出现 `ecdsaSignPki exception: No installed provider
 supports this key: (null)` 及后续 `DownloadException` / `responseCode=2304`。
+
+**诊断已闭环**（见下方结论），当前目标是**真的能下载成功**，因此新增修复模式
+（`TracerConfig.ENABLE_KEY_REPAIR`，默认开）。
 
 ## 硬约束
 
@@ -20,6 +23,28 @@ supports this key: (null)` 及后续 `DownloadException` / `responseCode=2304`�
 - **绝不 hook 类加载路径**（`ClassLoader#loadClass` 等），更不能在回调里做反射
   （`getDeclaredMethods()` / `Class.forName`）。首版这么干过：启动期嵌套类加载 →
   应用 ClassLoader 损坏 → `:ui` 进程黑屏。所有反射只在后台线程做，且限流。
+
+## 诊断结论（真机验证，可稳定复现）
+
+根因：AndroidKeyStore 里没有 alias `ota_pki_attest` 的 EC 私钥；App 调
+`containsAlias` 拿到 `false` 后无任何分支，直接 `getKey`→null→`initSign(null)`→
+InvalidKeyException。该密钥**App 自己从不生成**（全程零 `generateKeyPair`），属外部预置。
+`2304` 是本地构造（`body:null`），`/ts` 与 `/download` 均 HTTP 200。
+
+混淆映射：`SignVerifyUtils` = `com.oplus.ota.downloader.util.b`，`ecdsaSignPki` = `b.d()`，
+`getGkaReqDownloadType` = `b.i()`，`GetInfoThread` = `u7.a.run()`。
+dex 里的 `...util.SignVerifyUtils` 是空壳（`ClassNotFoundException`）。
+`b.g()` 返回 ~3200B base64 且每次内容不同 → 运行时生成的 CSR/证书请求体。
+
+## 修复模式（当前工作重点）
+
+`KeyRepair`：hook 点选在 `KeyStore#containsAlias` 返回 `false` 的那一刻生成 EC 密钥对
+（AndroidKeyStore + KeyGenParameterSpec, EC/secp256r1, PURPOSE_SIGN, DIGEST_SHA256）。
+时序上早于 `b.g()`（构造 CSR）和 `b.d()`（取私钥签名），一把钥匙补上全链路。
+
+边界（务必守住）：**不改 containsAlias 返回值、不改任何参数/返回值/异常**（CI 只读
+grep 门禁依旧通过）、**不跳过签名**，服务端照常验签。只补缺失的密钥材料。
+能否下载成功取决于服务端是否接受新密钥的证书；若换别的错误码（非 2304）即为下一判据。
 
 ## 工作流约束（用户既有习惯）
 
