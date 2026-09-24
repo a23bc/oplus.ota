@@ -40,6 +40,29 @@ public final class KeyStoreTracer {
         hook(java.security.KeyPairGenerator.class, "getInstance", String.class);
         hook(java.security.KeyFactory.class, "getInstance", String.class);
         hook(java.security.Signature.class, "getInstance", String.class);
+
+        // Fallback that does not depend on any class name: whatever the signing
+        // helper is called, it ends up in Signature.initSign(key). Note that
+        // getInstance() hands out Signature$Delegate, which overrides these
+        // methods - so both the base class and the delegate must be hooked.
+        hookSignature("java.security.Signature", "initSign", java.security.PrivateKey.class);
+        hookSignature("java.security.Signature$Delegate", "initSign", java.security.PrivateKey.class);
+        hookSignature("java.security.Signature", "sign");
+        hookSignature("java.security.Signature$Delegate", "sign");
+    }
+
+    private static void hookSignature(String cls, String method, Class<?>... params) {
+        try {
+            Class<?> c = Class.forName(cls);
+            Object[] call = new Object[params.length + 1];
+            System.arraycopy(params, 0, call, 0, params.length);
+            call[params.length] = new SignCallback(method);
+            XposedHelpers.findAndHookMethod(c, method, call);
+            OtaLog.i(SCOPE, "hooked " + cls + "#" + method);
+        } catch (Throwable t) {
+            OtaLog.i(SCOPE, "hook unavailable " + cls + "#" + method
+                    + " (" + t.getClass().getSimpleName() + ")");
+        }
     }
 
     /** Boot classes are passed as Class objects: no class-loader lookup needed. */
@@ -54,6 +77,53 @@ public final class KeyStoreTracer {
         } catch (Throwable t) {
             OtaLog.i(SCOPE, "hook unavailable " + c.getName() + "#" + method
                     + " (" + t.getClass().getSimpleName() + ")");
+        }
+    }
+
+    /** Signature.initSign / sign: shows the Key actually handed to the signer. */
+    private static final class SignCallback extends XC_MethodHook {
+
+        private final String method;
+
+        SignCallback(String method) {
+            this.method = method;
+        }
+
+        @Override
+        protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+            try {
+                if (!OtaLog.callerIsTargetApp()) {
+                    return;
+                }
+                StringBuilder sb = new StringBuilder(method).append(" enter");
+                Object[] args = param.args;
+                if (args != null) {
+                    for (int i = 0; i < args.length; i++) {
+                        sb.append(" arg[").append(i).append("]=").append(OtaLog.describe(args[i]));
+                    }
+                }
+                OtaLog.i(SCOPE, sb.toString());
+            } catch (Throwable t) {
+                OtaLog.err(SCOPE, "signature before logging failed", t);
+            }
+        }
+
+        @Override
+        protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+            try {
+                if (!OtaLog.callerIsTargetApp()) {
+                    return;
+                }
+                if (param.hasThrowable()) {
+                    OtaLog.i(SCOPE, method + " threw");
+                    OtaLog.stack(SCOPE, method + " exception:", param.getThrowable());
+                    return;
+                }
+                // Never print signature bytes - describe() reports length only.
+                OtaLog.i(SCOPE, method + " result " + OtaLog.describe(param.getResult()));
+            } catch (Throwable t) {
+                OtaLog.err(SCOPE, "signature after logging failed", t);
+            }
         }
     }
 
