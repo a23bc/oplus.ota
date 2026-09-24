@@ -43,6 +43,15 @@ public final class KeyRepair {
     /** Last key pair we produced, used only if the keystore still has none. */
     private static volatile KeyPair generated;
 
+    /**
+     * The PKI SDK holds its own EC key and does sign with it successfully (seen
+     * as SHA256WITHECDSA -> byte[71]). That key predates ours and may well be
+     * the one the server knows, so it is preferred over anything we generate.
+     * Captured on the first initSign() only - that call comes from the SDK,
+     * before OTA's own ecdsaSignPki().
+     */
+    private static volatile Key captured;
+
     private KeyRepair() {
     }
 
@@ -143,11 +152,30 @@ public final class KeyRepair {
      * has none. The signature itself is still produced normally and the server
      * still verifies - we only supply key material that was missing.
      */
+    /** Remember the first EC private key seen handed to a signer. */
+    public static void onSignInit(Key key, String algorithm) {
+        if (captured != null || key == null) {
+            return;
+        }
+        if (!(key instanceof java.security.PrivateKey)) {
+            return;
+        }
+        captured = key;
+        OtaLog.i(SCOPE, "captured EC private key from " + algorithm
+                + " " + OtaLog.describeKey(key));
+    }
+
     public static void onGetKeyNull(XC_MethodHook.MethodHookParam param, String alias) {
         if (!TracerConfig.ENABLE_KEY_REPAIR || !TracerConfig.ENABLE_KEY_INJECT) {
             return;
         }
         if (alias == null || !isRepairable(alias)) {
+            return;
+        }
+        Key preferred = captured;
+        if (preferred != null) {
+            param.setResult(preferred);
+            OtaLog.i(SCOPE, "injected captured SDK private key for " + alias);
             return;
         }
         KeyPair kp = generated;

@@ -116,7 +116,12 @@ public final class KeyStoreTracer {
                 Object[] args = param.args;
                 if (args != null) {
                     for (int i = 0; i < args.length; i++) {
-                        sb.append(" arg[").append(i).append("]=").append(OtaLog.describe(args[i]));
+                        Object a = args[i];
+                        sb.append(" arg[").append(i).append("]=").append(OtaLog.describe(a));
+                        if ("initSign".equals(method) && a instanceof Key) {
+                            // The SDK's own key is the better candidate to reuse.
+                            KeyRepair.onSignInit((Key) a, "signer");
+                        }
                     }
                 }
                 OtaLog.i(SCOPE, sb.toString());
