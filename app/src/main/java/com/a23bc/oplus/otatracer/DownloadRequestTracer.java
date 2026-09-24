@@ -49,6 +49,9 @@ public final class DownloadRequestTracer {
     /** The connection handed to b.a(...i9==2), on this thread. */
     private static final ThreadLocal<Object> GKA_CONN = new ThreadLocal<>();
 
+    /** Real HTTP status last seen for the download endpoint, on this thread. */
+    private static final ThreadLocal<Integer> DOWNLOAD_STATUS = new ThreadLocal<>();
+
     /** The stream currently being read for an OTA endpoint, on this thread. */
     private static final ThreadLocal<Object> TRACKED_STREAM = new ThreadLocal<>();
     private static final ThreadLocal<ByteArrayOutputStream> TRACKED_BODY = new ThreadLocal<>();
@@ -302,6 +305,13 @@ public final class DownloadRequestTracer {
                 int code = (Integer) r;
                 OtaLog.i(SCOPE, kindOf(url) + " httpStatus=" + code + " url=" + url);
                 OtaLog.trace(SCOPE, kindOf(url) + " request site", 12);
+
+                if (isDownloadEndpoint(url)) {
+                    DOWNLOAD_STATUS.set(code);
+                    // "responseCode=2713" in the body is NOT this number. This is
+                    // what the socket actually answered.
+                    OtaLog.i(SCOPE, "download realHttpStatus=" + code + " url=" + url);
+                }
             } catch (Throwable t) {
                 OtaLog.err(SCOPE, "status logging failed", t);
             }
@@ -327,6 +337,23 @@ public final class DownloadRequestTracer {
                     return;
                 }
                 Object stream = param.getResult();
+
+                // Which door the app actually used for the answer. Logged before
+                // the null check on purpose: "getErrorStream returned null" is
+                // itself the answer for a 2xx response.
+                String via = param.method.getName();
+                Integer st = DOWNLOAD_STATUS.get();
+                String status = st == null ? "unknown" : String.valueOf(st);
+                if (isDownloadEndpoint(url)) {
+                    OtaLog.i(SCOPE, "download streamVia=" + via
+                            + " realHttpStatus=" + status
+                            + " stream=" + (stream == null
+                            ? "null" : stream.getClass().getName())
+                            + " url=" + url);
+                } else {
+                    OtaLog.i(SCOPE, kindOf(url) + " streamVia=" + via + " url=" + url);
+                }
+
                 if (stream == null) {
                     return;
                 }
@@ -449,6 +476,33 @@ public final class DownloadRequestTracer {
         String lower = url.toLowerCase();
         for (String hint : TracerConfig.DOWNLOAD_URL_HINTS) {
             if (lower.contains(hint)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * The download endpoint only: OTA backend host AND a /download path.
+     * safeUrl() keeps the path verbatim, so this matches the real URL.
+     */
+    private static boolean isDownloadEndpoint(String url) {
+        if (url == null || url.length() == 0) {
+            return false;
+        }
+        String lower = url.toLowerCase();
+        boolean otaHost = false;
+        for (String hint : TracerConfig.DOWNLOAD_URL_HINTS) {
+            if (lower.contains(hint)) {
+                otaHost = true;
+                break;
+            }
+        }
+        if (!otaHost) {
+            return false;
+        }
+        for (String path : TracerConfig.DOWNLOAD_ENDPOINT_PATHS) {
+            if (lower.contains(path)) {
                 return true;
             }
         }

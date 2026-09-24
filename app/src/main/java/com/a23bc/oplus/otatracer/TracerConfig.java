@@ -277,6 +277,16 @@ public final class TracerConfig {
     /** Substrings that mark a URL as belonging to the OTA backend. */
     public static final String[] DOWNLOAD_URL_HINTS = {"allawntech", "component-ota"};
 
+    /**
+     * The one endpoint whose real HTTP status matters. The OTA app's own
+     * "responseCode=2713" is a field inside the response body, not an HTTP
+     * status - the two must not be confused when reading the log.
+     */
+    public static final String DOWNLOAD_ENDPOINT = "https://component-ota-cn.allawntech.com/download";
+
+    /** Path fragment of the download endpoint. */
+    public static final String[] DOWNLOAD_ENDPOINT_PATHS = {"/download"};
+
     /** Request headers printed verbatim: identifiers, not secrets. */
     public static final String[] HEADER_KEYS_PLAIN = {"id", "ts"};
 
