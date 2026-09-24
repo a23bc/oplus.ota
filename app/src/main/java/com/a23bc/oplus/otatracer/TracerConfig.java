@@ -77,6 +77,47 @@ public final class TracerConfig {
     /** Stack frames printed per call site. */
     public static final int STACK_DEPTH = 14;
 
+    // ---------------------------------------------------------------- switches
+    //
+    // Bisection aids: if the OTA process ever hangs again, flip these to false
+    // one at a time to find the culprit without uninstalling the module.
+
+    /** Hooks on shared classes: HttpURLConnection, KeyStore, SharedPreferences, Log. */
+    public static final boolean ENABLE_SHARED_CLASS_HOOKS = true;
+
+    /** Echo of the app's own log lines (android.util.Log is a very hot method). */
+    public static final boolean ENABLE_LOG_ECHO = true;
+
+    /** Background dex scans (keyword + deep method-name scan). */
+    public static final boolean ENABLE_DEX_SCAN = true;
+
+    // ------------------------------------------------------------ scheduling
+    //
+    // All discovery work runs off the main thread and is rate limited. The :ui
+    // process hung once when class loading itself was hooked; keep it that way.
+
+    /** Keyword dex scan start delay (main thread does nothing but schedule it). */
+    public static final int DEX_SCAN_DELAY_MS = 3000;
+
+    /** Method-name deep scan start delay, only if SignVerifyUtils is unresolved. */
+    public static final int DEEP_SCAN_DELAY_MS = 9000;
+
+    /** Yield after every N loaded classes during the deep scan. */
+    public static final int DEEP_SCAN_BATCH = 60;
+
+    /** Hard wall-clock budget for the deep scan. */
+    public static final int DEEP_SCAN_BUDGET_MS = 15000;
+
+    /** Sleep between scan batches, keeps the app responsive. */
+    public static final long SCAN_YIELD_MS = 15L;
+
+    /** Heartbeat lines, so a hang can be located by its last seq. */
+    public static final int HEARTBEAT_COUNT = 12;
+    public static final int HEARTBEAT_INTERVAL_MS = 5000;
+
+    /** Cap on echoed app log lines per second (Log is a very hot method). */
+    public static final int LOG_ECHO_MAX_PER_SEC = 25;
+
     private TracerConfig() {
     }
 }

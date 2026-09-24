@@ -79,10 +79,30 @@ seq=50 t=+1400ms [Response] responseCode=2304 url=https://.../ota/query?keys=[..
 
 类名靠三条路径定位，全部安全失败：
 
-1. `TracerConfig` 里的 FQCN 猜测（未混淆 ROM 的快路径）；
-2. `ClassLoader#loadClass` hook —— 类被链接时按**方法名**特征匹配（`ecdsaSignPki`、
-   `getGkaReqDownloadType` 这类名字通常不参与混淆）；
-3. 启动 1.5s 后的 dex 扫描兜底（按类名关键词 + 方法特征，命中才 `Class.forName`）。
+1. `TracerConfig` 里的 FQCN 猜测（未混淆 ROM 的快路径，启动即解析）；
+2. 启动 3s 后的**关键词 dex 扫描**（后台线程，按类名关键词命中才 `Class.forName`）；
+3. 启动 9s 后的**深度扫描**兜底（后台线程：加载 `com.oplus.ota` 下的类，按
+   `ecdsaSignPki` / `getGkaReqDownloadType` 等**方法名**匹配；限流 60 个/批、
+   总预算 15s；若路径 1、2 已命中 `SignVerifyUtils` 则跳过）。
+
+> 曾经有一版 hook 了 `ClassLoader#loadClass`，在回调里调 `getDeclaredMethods()`
+> 做方法名匹配。结果：嵌套类加载 → 应用 ClassLoader 损坏（连 `android.util.Log`
+> 都 `ClassNotFoundError`）→ `:ui` 进程黑屏。**类加载本身绝不再 hook**，所有反射
+> 只在后台线程做。
+
+## 黑屏 / 卡死排查
+
+装完如果 OTA 界面起不来：
+
+1. 先恢复现场（任选其一）：
+   - `adb uninstall com.a23bc.oplus.otatracer`
+   - LSPosed 里取消勾选模块（或开机时按音量键进 LSPosed 安全模式）
+2. 看日志最后一行停在哪 —— 启动后每 5s 有一条 `[Boot] heartbeat left=N rulesHit=[...]`
+   心跳（共 12 条 / 60s）。心跳停止的 seq 就是卡死点。
+3. 二分定位：`TracerConfig` 里有三个开关，改成 `false` 重新编译即可逐项排除
+   - `ENABLE_SHARED_CLASS_HOOKS` —— HttpURLConnection / KeyStore / SharedPreferences / Log
+   - `ENABLE_LOG_ECHO` —— 只关 Log 回声
+   - `ENABLE_DEX_SCAN` —— 只关后台 dex 扫描
 
 ## 编译
 

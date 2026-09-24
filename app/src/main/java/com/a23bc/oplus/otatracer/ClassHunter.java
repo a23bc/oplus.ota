@@ -17,16 +17,20 @@ import de.robv.android.xposed.XposedHelpers;
 import de.robv.android.xposed.callbacks.XC_LoadPackage;
 
 /**
- * Finds the class the tracer needs without knowing its obfuscated name.
+ * Finds the classes the tracer needs without knowing their obfuscated name.
  *
- * Three independent discovery paths, all best-effort:
- *   1. explicit FQCN guesses (fast path, works on unobfuscated builds)
- *   2. a ClassLoader#loadClass hook that inspects every class as it is linked
- *      (covers renamed classes as long as the target method names survive)
- *   3. a deferred dex scan that looks for classes by name keyword + method signature
+ * Discovery paths, all fail-safe:
+ *   1. explicit FQCN guesses, resolved immediately (cheap, unobfuscated builds)
+ *   2. keyword dex scan: class-name substrings only, background thread
+ *   3. deep dex scan: load com.oplus.ota classes and match declared method names,
+ *      background thread, rate limited and time boxed, only if SignVerifyUtils
+ *      was still unresolved
  *
- * Every path is wrapped so that a missing class is reported once and never crashes
- * the host app.
+ * IMPORTANT: nothing reflective runs on the main thread and class loading is
+ * never hooked. An earlier version hooked ClassLoader#loadClass and called
+ * getDeclaredMethods() inside its callback; that triggered nested class loading
+ * and corrupted the app class loader (every later findClass failed and the :ui
+ * process hung on a black screen). Do not reintroduce it.
  */
 public final class ClassHunter {
 
@@ -36,8 +40,14 @@ public final class ClassHunter {
     }
 
     private static final Set<String> SEEN = Collections.synchronizedSet(new HashSet<>());
+    private static final Set<String> HIT_RULES = Collections.synchronizedSet(new HashSet<>());
     private static final List<Rule> RULES = Collections.synchronizedList(new ArrayList<>());
-    private static boolean loadClassHookInstalled = false;
+
+    private static final Handler MAIN = new Handler(Looper.getMainLooper());
+
+    private static volatile ClassLoader appClassLoader;
+    private static volatile boolean installed = false;
+    private static volatile boolean scanStopped = false;
 
     private ClassHunter() {
     }
@@ -59,98 +69,108 @@ public final class ClassHunter {
         }
     }
 
-    /**
-     * Register interest in a class. Discovery starts immediately for the FQCN
-     * guesses and continues lazily via the ClassLoader hook.
-     */
     public static void watch(String ruleName,
                              String[] fqcnCandidates,
                              String[] methodNames,
                              String[] simpleNameHints,
                              ClassVisitor visitor) {
-        Rule rule = new Rule(ruleName, fqcnCandidates, methodNames, simpleNameHints, visitor);
-        RULES.add(rule);
+        RULES.add(new Rule(ruleName, fqcnCandidates, methodNames, simpleNameHints, visitor));
         OtaLog.i("Hunter", "rule registered name=" + ruleName);
     }
 
-    /** Install the lazy class-loading hook. Idempotent. */
-    public static void install(final XC_LoadPackage.LoadPackageParam lpparam) {
-        if (loadClassHookInstalled) {
+    /**
+     * Call after every rule is registered: resolves the known FQCNs and schedules
+     * the background scans plus a heartbeat.
+     */
+    public static void install(XC_LoadPackage.LoadPackageParam lpparam) {
+        if (installed) {
             return;
         }
-        try {
-            XposedHelpers.findAndHookMethod(ClassLoader.class, "loadClass", String.class,
-                    new XC_MethodHook() {
-                        @Override
-                        protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                            if (param.hasThrowable()) {
-                                return;
-                            }
-                            Object result = param.getResult();
-                            if (!(result instanceof Class<?>)) {
-                                return;
-                            }
-                            try {
-                                dispatch((Class<?>) result);
-                            } catch (Throwable ignored) {
-                                // Never let tracing break class loading.
-                            }
-                        }
-                    });
-            loadClassHookInstalled = true;
-            OtaLog.i("Hunter", "ClassLoader#loadClass hook installed");
-        } catch (Throwable t) {
-            OtaLog.err("Hunter", "loadClass hook failed", t);
+        installed = true;
+        appClassLoader = lpparam.classLoader;
+
+        resolveKnown(lpparam);
+
+        if (!TracerConfig.ENABLE_DEX_SCAN) {
+            OtaLog.i("Hunter", "dex scans disabled by config");
+            return;
         }
 
-        final ClassLoader cl = lpparam.classLoader;
-        // Deferred dex scan: cheap keyword pre-filter, then structural check.
-        new Handler(Looper.getMainLooper()).postDelayed(new Runnable() {
+        MAIN.postDelayed(new Runnable() {
             @Override
             public void run() {
                 new Thread(new Runnable() {
                     @Override
                     public void run() {
                         try {
-                            scanDexes(cl);
+                            keywordScan();
                         } catch (Throwable t) {
-                            OtaLog.err("Hunter", "dex scan failed", t);
+                            OtaLog.err("Hunter", "keyword scan failed", t);
                         }
                     }
-                }, "OtaTracer-dexscan").start();
+                }, "OtaTracer-kwscan").start();
             }
-        }, 1500);
+        }, TracerConfig.DEX_SCAN_DELAY_MS);
+
+        MAIN.postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                if (HIT_RULES.contains("SignVerifyUtils")) {
+                    OtaLog.i("Hunter", "deep scan skipped: SignVerifyUtils already resolved");
+                    return;
+                }
+                new Thread(new Runnable() {
+                    @Override
+                    public void run() {
+                        try {
+                            deepScan();
+                        } catch (Throwable t) {
+                            OtaLog.err("Hunter", "deep scan failed", t);
+                        }
+                    }
+                }, "OtaTracer-dpscan").start();
+            }
+        }, TracerConfig.DEEP_SCAN_DELAY_MS);
+
+        startHeartbeat();
+    }
+
+    /** Heartbeat makes a hang visible: the last printed seq is where it froze. */
+    private static void startHeartbeat() {
+        final int[] left = {TracerConfig.HEARTBEAT_COUNT};
+        MAIN.postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                OtaLog.i("Boot", "heartbeat left=" + left[0]
+                        + " rulesHit=" + new ArrayList<>(HIT_RULES)
+                        + " scanStopped=" + scanStopped);
+                left[0]--;
+                if (left[0] > 0) {
+                    MAIN.postDelayed(this, TracerConfig.HEARTBEAT_INTERVAL_MS);
+                }
+            }
+        }, TracerConfig.HEARTBEAT_INTERVAL_MS);
     }
 
     // ------------------------------------------------------------- resolution
 
-    /** Try the explicit FQCN guesses right away (unobfuscated builds). */
     public static void resolveKnown(XC_LoadPackage.LoadPackageParam lpparam) {
         for (Rule r : new ArrayList<>(RULES)) {
             if (r.fqcnCandidates == null) {
                 continue;
             }
             for (String fqcn : r.fqcnCandidates) {
-                Class<?> c = null;
+                Class<?> c;
                 try {
                     c = XposedHelpers.findClassIfExists(fqcn, lpparam.classLoader);
-                } catch (Throwable ignored) {
+                } catch (Throwable t) {
                     c = null;
                 }
                 if (c != null) {
                     deliver(r, c, "fqcn");
+                } else {
+                    OtaLog.i("Hunter", "no class " + fqcn);
                 }
-            }
-        }
-    }
-
-    private static void dispatch(Class<?> clazz) {
-        if (clazz == null) {
-            return;
-        }
-        for (Rule r : new ArrayList<>(RULES)) {
-            if (matches(r, clazz)) {
-                deliver(r, clazz, "loadClass");
             }
         }
     }
@@ -166,12 +186,12 @@ public final class ClassHunter {
                 }
             }
         }
-        if (r.methodNames != null) {
+        if (r.methodNames != null && r.methodNames.length > 0) {
             Method[] ms;
             try {
                 ms = clazz.getDeclaredMethods();
             } catch (Throwable t) {
-                return false; // NoClassDefFoundError while resolving signatures
+                return false; // unresolvable signatures while linking
             }
             if (ms != null) {
                 for (Method m : ms) {
@@ -190,6 +210,7 @@ public final class ClassHunter {
         if (!SEEN.add(r.name + "|" + clazz.getName())) {
             return;
         }
+        HIT_RULES.add(r.name);
         OtaLog.i("Hunter", "hit rule=" + r.name + " class=" + clazz.getName() + " via=" + via);
         try {
             r.visitor.onClass(clazz);
@@ -198,83 +219,177 @@ public final class ClassHunter {
         }
     }
 
-    // ---------------------------------------------------------------- dex scan
+    // ------------------------------------------------------------- dex scans
+
+    /** Enumerate dex entries; only class-name filtering decides what to load. */
+    private static void keywordScan() {
+        ClassLoader cl = appClassLoader;
+        if (cl == null) {
+            return;
+        }
+        Enumeration<String> names = dexEntries(cl);
+        if (names == null) {
+            OtaLog.i("Hunter", "keyword scan skipped: no dex entries");
+            return;
+        }
+        int scanned = 0;
+        int candidates = 0;
+        while (names.hasMoreElements() && !scanStopped) {
+            String cn = names.nextElement();
+            scanned++;
+            if (!isInterestingName(cn)) {
+                continue;
+            }
+            candidates++;
+            Class<?> c;
+            try {
+                c = Class.forName(cn, false, cl);
+            } catch (Throwable t) {
+                OtaLog.i("Hunter", "candidate load failed " + cn
+                        + " (" + t.getClass().getSimpleName() + ")");
+                continue;
+            }
+            for (Rule r : new ArrayList<>(RULES)) {
+                if (matches(r, c)) {
+                    deliver(r, c, "keyword");
+                }
+            }
+            sleepQuietly(TracerConfig.SCAN_YIELD_MS);
+        }
+        OtaLog.i("Hunter", "keyword scan done scanned=" + scanned + " candidates=" + candidates);
+    }
 
     /**
-     * Enumerate class names straight out of the dex files and structurally check
-     * the promising ones. Only used as a fallback for classes already loaded
-     * before our hook was in place.
+     * Obfuscation fallback: load com.oplus.ota classes and match declared method
+     * names. Rate limited and time boxed, background thread only.
      */
-    private static void scanDexes(ClassLoader cl) {
+    private static void deepScan() {
+        ClassLoader cl = appClassLoader;
+        if (cl == null) {
+            return;
+        }
+        Enumeration<String> names = dexEntries(cl);
+        if (names == null) {
+            OtaLog.i("Hunter", "deep scan skipped: no dex entries");
+            return;
+        }
+        long deadline = System.currentTimeMillis() + TracerConfig.DEEP_SCAN_BUDGET_MS;
+        int loaded = 0;
+        int checked = 0;
+        while (names.hasMoreElements() && !scanStopped) {
+            if (System.currentTimeMillis() > deadline) {
+                OtaLog.i("Hunter", "deep scan budget exhausted loaded=" + loaded);
+                scanStopped = true;
+                break;
+            }
+            String cn = names.nextElement();
+            if (!cn.startsWith(TracerConfig.TARGET_PACKAGE)) {
+                continue;
+            }
+            Class<?> c;
+            try {
+                c = Class.forName(cn, false, cl);
+            } catch (Throwable t) {
+                continue;
+            }
+            loaded++;
+            if (++checked % TracerConfig.DEEP_SCAN_BATCH == 0) {
+                sleepQuietly(TracerConfig.SCAN_YIELD_MS);
+            }
+            for (Rule r : new ArrayList<>(RULES)) {
+                if (r.methodNames == null || r.methodNames.length == 0) {
+                    continue;
+                }
+                if (matches(r, c)) {
+                    deliver(r, c, "deep");
+                }
+            }
+        }
+        OtaLog.i("Hunter", "deep scan done loaded=" + loaded + " checked=" + checked);
+    }
+
+    private static Enumeration<String> dexEntries(ClassLoader cl) {
         Object pathList;
         try {
             pathList = XposedHelpers.getObjectField(cl, "pathList");
         } catch (Throwable t) {
-            OtaLog.i("Hunter", "dex scan skipped: no pathList on " + cl.getClass().getName());
-            return;
+            OtaLog.i("Hunter", "no pathList on " + cl.getClass().getName());
+            return null;
         }
         Object[] elements;
         try {
             elements = (Object[]) XposedHelpers.getObjectField(pathList, "dexElements");
         } catch (Throwable t) {
-            OtaLog.i("Hunter", "dex scan skipped: no dexElements");
-            return;
+            OtaLog.i("Hunter", "no dexElements");
+            return null;
         }
         if (elements == null) {
-            return;
+            return null;
         }
-
-        int scanned = 0;
-        int candidates = 0;
+        final List<Enumeration<String>> enums = new ArrayList<>();
         for (Object element : elements) {
             if (element == null) {
                 continue;
             }
-            Object dexFileObj = null;
+            Object dexFileObj;
             try {
                 dexFileObj = XposedHelpers.getObjectField(element, "dexFile");
-            } catch (Throwable ignored) {
-                // Element shape changed on some versions; try the nested path.
+            } catch (Throwable t) {
+                continue;
             }
             if (dexFileObj == null) {
                 continue;
             }
-            Enumeration<String> names = null;
             try {
-                names = (Enumeration<String>) dexFileObj.getClass()
-                        .getMethod("entries").invoke(dexFileObj);
+                Object e = dexFileObj.getClass().getMethod("entries").invoke(dexFileObj);
+                if (e instanceof Enumeration<?>) {
+                    enums.add((Enumeration<String>) e);
+                }
             } catch (Throwable ignored) {
-                continue;
-            }
-            if (names == null) {
-                continue;
-            }
-            while (names.hasMoreElements()) {
-                String cn = names.nextElement();
-                scanned++;
-                if (!isInterestingName(cn)) {
-                    continue;
-                }
-                candidates++;
-                Class<?> c;
-                try {
-                    c = Class.forName(cn, false, cl);
-                } catch (Throwable t) {
-                    continue;
-                }
-                dispatch(c);
+                // Element shape differs on some ROMs; nothing to do.
             }
         }
-        OtaLog.i("Hunter", "dex scan done scanned=" + scanned + " candidates=" + candidates);
+        if (enums.isEmpty()) {
+            return null;
+        }
+        return new Enumeration<String>() {
+            int idx = 0;
+
+            @Override
+            public boolean hasMoreElements() {
+                while (idx < enums.size()) {
+                    if (enums.get(idx).hasMoreElements()) {
+                        return true;
+                    }
+                    idx++;
+                }
+                return false;
+            }
+
+            @Override
+            public String nextElement() {
+                return enums.get(idx).nextElement();
+            }
+        };
     }
 
-    /** Cheap string pre-filter so we do not touch thousands of classes. */
     private static boolean isInterestingName(String cn) {
         String n = cn.toLowerCase();
-        return n.contains("signverify") || n.contains("signverifyutils")
-                || n.contains("getinfothread") || n.contains("downloadexception")
-                || n.contains("ecdsa") || n.contains("gka");
+        return n.contains("signverify") || n.contains("getinfothread")
+                || n.contains("downloadexception") || n.contains("ecdsa")
+                || n.contains("gka") || n.contains("signutil");
     }
+
+    private static void sleepQuietly(long ms) {
+        try {
+            Thread.sleep(ms);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            scanStopped = true;
+        }
+    }
+
+    // ------------------------------------------------------------------ hooks
 
     /** Hook every overload of a named method; never modifies the invocation. */
     public static void hookAllByName(Class<?> clazz,
@@ -283,6 +398,10 @@ public final class ClassHunter {
                                      String scope) {
         try {
             Set<XC_MethodHook.Unhook> hooks = XposedBridge.hookAllMethods(clazz, methodName, callback);
+            if (hooks.isEmpty()) {
+                OtaLog.i(scope, "no method named " + methodName + " on " + clazz.getName());
+                return;
+            }
             OtaLog.i(scope, "hooked " + methodName + " overloads=" + hooks.size()
                     + " on " + clazz.getName());
         } catch (Throwable t) {
@@ -296,6 +415,10 @@ public final class ClassHunter {
                                            String scope) {
         try {
             Set<XC_MethodHook.Unhook> hooks = XposedBridge.hookAllConstructors(clazz, callback);
+            if (hooks.isEmpty()) {
+                OtaLog.i(scope, "no constructor on " + clazz.getName());
+                return;
+            }
             OtaLog.i(scope, "hooked <init> overloads=" + hooks.size() + " on " + clazz.getName());
         } catch (Throwable t) {
             OtaLog.err(scope, "hook <init> failed on " + clazz.getName(), t);

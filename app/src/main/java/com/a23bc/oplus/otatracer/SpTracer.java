@@ -47,9 +47,6 @@ public final class SpTracer {
         @Override
         protected void afterHookedMethod(MethodHookParam param) throws Throwable {
             try {
-                if (!OtaLog.callerIsTargetApp()) {
-                    return;
-                }
                 if (param.hasThrowable()) {
                     return;
                 }
@@ -57,6 +54,8 @@ public final class SpTracer {
                 if (!(key instanceof String)) {
                     return;
                 }
+                // Cheap filter first: getInt is hot during startup, and building
+                // a stack trace is not. Only interesting keys pay for it.
                 String k = ((String) key).toLowerCase();
                 boolean hit = false;
                 for (String hint : TracerConfig.SP_KEY_HINTS) {
@@ -66,6 +65,9 @@ public final class SpTracer {
                     }
                 }
                 if (!hit) {
+                    return;
+                }
+                if (!OtaLog.callerIsTargetApp()) {
                     return;
                 }
                 OtaLog.i(SCOPE, "getInt key=" + key + " value=" + param.getResult());

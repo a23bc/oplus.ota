@@ -35,13 +35,28 @@ public final class LogTracer {
 
     private static void hook(ClassLoader cl, String method, Class<?>... params) {
         try {
-            Class<?> c = XposedHelpers.findClass(Log.class.getName(), cl);
-            XposedHelpers.findAndHookMethod(c, method, params, new LogCallback(method));
+            // Log is a boot class: pass the Class object directly instead of
+            // asking a (possibly already busy) app class loader to resolve it.
+            XposedHelpers.findAndHookMethod(Log.class, method, params, new LogCallback(method));
             OtaLog.i(SCOPE, "hooked android.util.Log#" + method);
         } catch (Throwable t) {
             OtaLog.i(SCOPE, "hook unavailable Log#" + method
                     + " (" + t.getClass().getSimpleName() + ")");
         }
+    }
+
+    /** Sliding one-second budget for echoed lines (no lock, approximate is fine). */
+    private static final java.util.concurrent.atomic.AtomicInteger ECHOED =
+            new java.util.concurrent.atomic.AtomicInteger(0);
+    private static volatile long windowStart = 0L;
+
+    private static boolean allowMore() {
+        long now = System.currentTimeMillis();
+        if (now - windowStart > 1000L) {
+            windowStart = now;
+            ECHOED.set(0);
+        }
+        return ECHOED.incrementAndGet() <= TracerConfig.LOG_ECHO_MAX_PER_SEC;
     }
 
     private static final class LogCallback extends XC_MethodHook {
@@ -92,6 +107,9 @@ public final class LogTracer {
                 }
                 if (!tagHit && !msgHit) {
                     return;
+                }
+                if (!allowMore()) {
+                    return; // Log is hot; never flood logcat or the tracer.
                 }
                 OtaLog.i(SCOPE, method + " tag=" + tag + " msg=" + OtaLog.safeMsg(msg));
             } catch (Throwable t) {

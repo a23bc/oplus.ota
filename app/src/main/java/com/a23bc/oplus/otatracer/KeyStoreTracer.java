@@ -31,29 +31,28 @@ public final class KeyStoreTracer {
             return;
         }
         installed = true;
-        hook(lpparam.classLoader, "java.security.KeyStore", "getInstance", String.class);
-        hook(lpparam.classLoader, "java.security.KeyStore", "load",
-                java.security.KeyStore.LoadStoreParameter.class);
-        hook(lpparam.classLoader, "java.security.KeyStore", "getKey", String.class, char[].class);
-        hook(lpparam.classLoader, "java.security.KeyStore", "getEntry", String.class,
+        hook(java.security.KeyStore.class, "getInstance", String.class);
+        hook(java.security.KeyStore.class, "load", java.security.KeyStore.LoadStoreParameter.class);
+        hook(java.security.KeyStore.class, "getKey", String.class, char[].class);
+        hook(java.security.KeyStore.class, "getEntry", String.class,
                 java.security.KeyStore.ProtectionParameter.class);
-        hook(lpparam.classLoader, "java.security.KeyStore", "getCertificate", String.class);
-        hook(lpparam.classLoader, "java.security.KeyPairGenerator", "getInstance", String.class);
-        hook(lpparam.classLoader, "java.security.KeyFactory", "getInstance", String.class);
-        hook(lpparam.classLoader, "java.security.Signature", "getInstance", String.class);
+        hook(java.security.KeyStore.class, "getCertificate", String.class);
+        hook(java.security.KeyPairGenerator.class, "getInstance", String.class);
+        hook(java.security.KeyFactory.class, "getInstance", String.class);
+        hook(java.security.Signature.class, "getInstance", String.class);
     }
 
-    private static void hook(ClassLoader cl, String cls, String method, Class<?>... params) {
+    /** Boot classes are passed as Class objects: no class-loader lookup needed. */
+    private static void hook(Class<?> c, String method, Class<?>... params) {
         try {
-            Class<?> c = XposedHelpers.findClass(cls, cl);
             // findAndHookMethod takes (Class..., callback) flattened - build it explicitly.
             Object[] call = new Object[params.length + 1];
             System.arraycopy(params, 0, call, 0, params.length);
-            call[params.length] = new KeyStoreCallback(cls, method);
+            call[params.length] = new KeyStoreCallback(c.getName(), method);
             XposedHelpers.findAndHookMethod(c, method, call);
-            OtaLog.i(SCOPE, "hooked " + cls + "#" + method);
+            OtaLog.i(SCOPE, "hooked " + c.getName() + "#" + method);
         } catch (Throwable t) {
-            OtaLog.i(SCOPE, "hook unavailable " + cls + "#" + method
+            OtaLog.i(SCOPE, "hook unavailable " + c.getName() + "#" + method
                     + " (" + t.getClass().getSimpleName() + ")");
         }
     }

@@ -26,21 +26,24 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 + " pkg=" + lpparam.packageName
                 + " isFirstApp=" + lpparam.isFirstApplication);
 
-        // Discovery first: the ClassLoader hook must be live before app classes load.
-        ClassHunter.install(lpparam);
-
+        // Register what we are looking for first...
         SignVerifyTracer.install(lpparam);
         GetInfoThreadTracer.install(lpparam);
         DownloadExceptionTracer.install(lpparam);
 
-        // Fast path for unobfuscated builds: try the known FQCNs immediately.
-        ClassHunter.resolveKnown(lpparam);
+        // ...then resolve the known FQCNs and schedule the background scans.
+        // Class loading itself is never hooked - see ClassHunter.
+        ClassHunter.install(lpparam);
 
         // Shared-class hooks, self-filtered to the OTA call stack.
-        ResponseCodeTracer.install(lpparam);
-        KeyStoreTracer.install(lpparam);
-        SpTracer.install(lpparam);
-        LogTracer.install(lpparam);
+        if (TracerConfig.ENABLE_SHARED_CLASS_HOOKS) {
+            ResponseCodeTracer.install(lpparam);
+            KeyStoreTracer.install(lpparam);
+            SpTracer.install(lpparam);
+            if (TracerConfig.ENABLE_LOG_ECHO) {
+                LogTracer.install(lpparam);
+            }
+        }
 
         OtaLog.i("Boot", "install complete - filter with: logcat -s OplusOtaTracer");
     }
