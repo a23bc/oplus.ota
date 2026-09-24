@@ -296,6 +296,13 @@ public final class TracerConfig {
     /** Captured response bodies are truncated at this many characters. */
     public static final int MAX_BODY_CHARS = 4000;
 
+    /**
+     * MD5 of the empty string. b.k() returns "" when getOpenid throws, and id then
+     * silently becomes exactly this. Seeing it in the log means the GUID was not
+     * obtained - no guessing required.
+     */
+    public static final String MD5_OF_EMPTY = "d41d8cd98f00b204e9800998ecf8427e";
+
     /** Tags always echoed when verbose logging is on. */
     public static final String[] VERBOSE_LOG_TAGS = {
             "OTAApplication", "Attestation", "allawn", "pki", "Crypto", "GetInfoThread",

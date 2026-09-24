@@ -52,6 +52,9 @@ public final class DownloadRequestTracer {
     /** Real HTTP status last seen for the download endpoint, on this thread. */
     private static final ThreadLocal<Integer> DOWNLOAD_STATUS = new ThreadLocal<>();
 
+    /** Value parsed out of the /ts response body, on this thread. */
+    private static final ThreadLocal<Long> TS_BODY_VALUE = new ThreadLocal<>();
+
     /** The stream currently being read for an OTA endpoint, on this thread. */
     private static final ThreadLocal<Object> TRACKED_STREAM = new ThreadLocal<>();
     private static final ThreadLocal<ByteArrayOutputStream> TRACKED_BODY = new ThreadLocal<>();
@@ -98,6 +101,85 @@ public final class DownloadRequestTracer {
                 continue;
             }
             ClassHunter.hookAllByName(c, "a", new GkaReqCallback(), SCOPE);
+            // k() supplies the GUID behind id, p() supplies ts. Both have silent
+            // fallbacks that never raise, so their real output has to be observed.
+            ClassHunter.hookAllByName(c, "k", new GuidCallback(), SCOPE);
+            ClassHunter.hookAllByName(c, "p", new TsSourceCallback(), SCOPE);
+        }
+    }
+
+    /**
+     * GUID behind the id header. k() returns "" when getOpenid throws, and id then
+     * silently becomes MD5(""). Never print the GUID itself - it is a persistent
+     * device identifier.
+     */
+    private static final class GuidCallback extends XC_MethodHook {
+
+        @Override
+        protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+            try {
+                Object[] args = param.args;
+                if (args == null || args.length != 1
+                        || !(args[0] instanceof android.content.Context)) {
+                    return;
+                }
+                if (param.hasThrowable()) {
+                    OtaLog.i(SCOPE, "guid threw ex=" + OtaLog.describe(param.getThrowable()));
+                    return;
+                }
+                Object r = param.getResult();
+                if (!(r instanceof String)) {
+                    return;
+                }
+                String guid = (String) r;
+                if (guid.length() == 0) {
+                    OtaLog.i(SCOPE, "guid EMPTY -> id will fall back to MD5(\"\")="
+                            + TracerConfig.MD5_OF_EMPTY);
+                    return;
+                }
+                OtaLog.i(SCOPE, "guid len=" + guid.length()
+                        + " sha256=" + OtaLog.digestFull(guid));
+            } catch (Throwable t) {
+                OtaLog.err(SCOPE, "guid logging failed", t);
+            }
+        }
+    }
+
+    /**
+     * ts actually used. p() asks /ts and returns its body parsed as a long; when
+     * /ts is unreachable or empty it silently returns the local clock instead.
+     * Comparing its result against the /ts body we captured is the only way to
+     * tell those two apart from outside.
+     */
+    private static final class TsSourceCallback extends XC_MethodHook {
+
+        @Override
+        protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+            try {
+                if (param.hasThrowable()) {
+                    OtaLog.i(SCOPE, "ts source threw ex="
+                            + OtaLog.describe(param.getThrowable()));
+                    return;
+                }
+                Object r = param.getResult();
+                if (!(r instanceof Long)) {
+                    return;
+                }
+                long ts = (Long) r;
+                Long server = TS_BODY_VALUE.get();
+                String verdict;
+                if (server == null) {
+                    verdict = "noTsBodyCaptured";
+                } else if (server.longValue() == ts) {
+                    verdict = "matches /ts body";
+                } else {
+                    verdict = "MISMATCH - fell back to local clock?";
+                }
+                OtaLog.i(SCOPE, "tsUsed=" + ts + " tsBody="
+                        + (server == null ? "unknown" : server) + " -> " + verdict);
+            } catch (Throwable t) {
+                OtaLog.err(SCOPE, "ts source logging failed", t);
+            }
         }
     }
 
@@ -141,6 +223,17 @@ public final class DownloadRequestTracer {
         @Override
         protected void afterHookedMethod(MethodHookParam param) throws Throwable {
             try {
+                // b.a() wraps everything in catch(Exception) and only logs. A throw
+                // here means id/ts/ac/as were never added at all, so surface it.
+                if (param.hasThrowable()) {
+                    Object[] a = param.args;
+                    if (a != null && a.length == 4) {
+                        OtaLog.i(SCOPE, "b.a threw ex="
+                                + OtaLog.describe(param.getThrowable())
+                                + " -> NO gka headers added");
+                        OtaLog.stack(SCOPE, "b.a exception:", param.getThrowable());
+                    }
+                }
                 int[] depth = IN_GKA_REQUEST.get();
                 if (depth == null) {
                     return;
@@ -454,6 +547,16 @@ public final class DownloadRequestTracer {
         }
         OtaLog.i(SCOPE, kindOf(url) + " bodyBytes=" + bos.size() + " url=" + url);
         OtaLog.i(SCOPE, kindOf(url) + " body=" + body);
+
+        // The /ts answer is a bare number; keep it so p()'s result can be checked
+        // against it instead of being taken on faith.
+        if ("ts".equals(kindOf(url))) {
+            try {
+                TS_BODY_VALUE.set(Long.valueOf(body.trim()));
+            } catch (Throwable ignored) {
+                TS_BODY_VALUE.remove();
+            }
+        }
     }
 
     // ------------------------------------------------------------------ filters

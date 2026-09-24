@@ -60,6 +60,42 @@ AttestationManager.packIdAttestation() -> false ; generateX509() -> null
 SDK 的 attestation 流程内，只打了 `[Repair] deferring to SDK attestation flow`。
 所以 r14 起 `ENABLE_KEY_REPAIR` / `ENABLE_KEY_INJECT` 均为 false，行为不变。
 
+## gkaReq=2 认证链（源码级定稿，无需再查）
+
+`com/oplus/ota/downloader/util/b.java` L54-84（被 hook 的 `b.a`）：
+```
+id  = MD5(getOpenid(context, GUID))          m(k(context))
+ts  = GET ${component_update_url}/ts 的 body 解析成 long   p(context)
+uri = URL path+query → 去掉首个 "/" → 所有 "=" 改成 ":"
+ac  = OPLUS PKI attestation 证书链 Base64     (i9==2 → l(2).o())
+as  = Base64(SHA256withECDSA(p5.b.t()))       d(bVar)
+L78-81 → addRequestProperty: id / ts / ac / as
+```
+`p5/b.java:499` `t()` = `JSONObject{id,ts,uri}.toString()`（顺序 id→ts→uri）。
+
+**两个静默回退（极易被忽略，日志里能一票否决）**：
+- `/ts` 非 200 或 body 空 → `ts` 静默回退 `System.currentTimeMillis()`（`p()` L278-311）
+- `getOpenid` 抛异常 → `id` 静默变成 `MD5("") = d41d8cd98f00b204e9800998ecf8427e`（`k()` L219-229）
+
+`u7/a.java:69-73`：gka 头只在 `b.i(ctx)∈{1,2}` **且** `DownloadRequest.mDownloadType(w)∈{0,1}` 时才加。
+
+## 2713 的定性（2026-09-24 只读源码分析，结论性）
+
+**APK 内没有 2713 的任何定义/映射/文案。** 全树零命中。
+它 = `u7/a.java:96`（及 `b7/b.java:127`）
+`new JSONObject(body).optInt("responseCode", 2)` —— 服务端 body 字段的原样拷贝。
+`mCode` 恒为 2（`EXCEPTION_SERVER_SUPPORT_CODE`），mGKACode = 2713 只被存进
+`PackageListInfo.K`（`b7/e.java:59`）做持久化，没有任何 switch/提示。
+
+**判据级要点：HTTP 206 = 成功，200 = 客户端判定「被拒绝」。**
+`u7/a.java:78-96`：206 走分段下载；200 就把整个 body 当错误 JSON 解析并抛异常。
+所以「/download HTTP 200」本身就等于服务端拒绝，2713 不是 HTTP status。
+
+请求里客户端能决定的变量只有：URL（手动下载 = mManualUrl/f6261h）、
+`userId="oplus-ota|"+OTA App versionCode`（**不是账号**）、
+`marketName=Base64(ro.vendor.oplus.market.name)`、以及 `b.a()` 加的 id/ts/ac/as。
+`b.a()` 还有个前置闸门：`DownloadRequest.mDownloadType`（`b7.d.w`）必须 ∈ {0,1}。
+
 ## 修复模式（当前工作重点）
 
 `KeyRepair`：hook 点选在 `KeyStore#containsAlias` 返回 `false` 的那一刻生成 EC 密钥对

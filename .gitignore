@@ -11,3 +11,14 @@ local.properties
 logs/
 screenshots/
 artifacts/
+
+# Decompiled OTA APK (14k files, tens of MB). Analysis material, not source.
+# Re-add a single file with: git add -f <path>
+decompiled/
+
+# Root-level adb logs
+/*.log
+
+# Chat log imported from another assistant; 0.4MB of prose.
+# git add -f it if you want it tracked.
+分析内测包提取.md
