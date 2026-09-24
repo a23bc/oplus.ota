@@ -93,35 +93,38 @@ public final class ResponseCodeTracer {
             }
         }
 
-        /** scheme://host/path plus query *names* only - values may be tokens. */
-        private String safeUrl(Object thiz) {
-            if (thiz == null) {
+    /**
+     * scheme://host/path plus query *names* only - values may be tokens.
+     * Package-visible so other tracers reuse the same sanitising rule instead
+     * of inventing a second one.
+     */
+    static String safeUrl(Object thiz) {
+        if (thiz == null) {
+            return "null";
+        }
+        try {
+            Method m = thiz.getClass().getMethod("getURL");
+            Object u = m.invoke(thiz);
+            if (u == null) {
                 return "null";
             }
-            try {
-                Method m = thiz.getClass().getMethod("getURL");
-                Object u = m.invoke(thiz);
-                if (u == null) {
-                    return "null";
-                }
-                String s = String.valueOf(u);
-                int q = s.indexOf('?');
-                if (q < 0) {
-                    return s;
-                }
-                String base = s.substring(0, q);
-                StringBuilder names = new StringBuilder();
-                for (String pair : s.substring(q + 1).split("&")) {
-                    int eq = pair.indexOf('=');
-                    if (names.length() > 0) {
-                        names.append(',');
-                    }
-                    names.append(eq < 0 ? pair : pair.substring(0, eq));
-                }
-                return base + "?keys=[" + names + "]";
-            } catch (Throwable t) {
-                return "url-unavailable(" + thiz.getClass().getSimpleName() + ")";
+            String s = String.valueOf(u);
+            int q = s.indexOf('?');
+            if (q < 0) {
+                return s;
             }
+            String base = s.substring(0, q);
+            StringBuilder names = new StringBuilder();
+            for (String pair : s.substring(q + 1).split("&")) {
+                int eq = pair.indexOf('=');
+                if (names.length() > 0) {
+                    names.append(',');
+                }
+                names.append(eq < 0 ? pair : pair.substring(0, eq));
+            }
+            return base + "?keys=[" + names + "]";
+        } catch (Throwable t) {
+            return "url-unavailable(" + thiz.getClass().getSimpleName() + ")";
         }
     }
 }

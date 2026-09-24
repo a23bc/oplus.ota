@@ -51,6 +51,15 @@ AttestationManager.packIdAttestation() -> false ; generateX509() -> null
 注：早期曾把 2713 解释为"新密钥未向服务端注册"，**该解释不完整，已作废**。
 `sign()` 成功 ≠ attestation 成功。
 
+## 密钥到底是谁造的（2026-09-24 r11 日志复核，重要）
+
+**不是我们，也不是 App —— 是系统 Provider。**
+`android.provider.BeandCupClalt.createApplicationPublicKey()` 造出密钥，
+随后 `KeyStore#getKey("ota_pki_attest")` 真的返回 `AndroidKeyStoreECPrivateKey`。
+我们的 `KeyRepair` 在这条链路上**从未生效**：`containsAlias -> false` 时正好在
+SDK 的 attestation 流程内，只打了 `[Repair] deferring to SDK attestation flow`。
+所以 r14 起 `ENABLE_KEY_REPAIR` / `ENABLE_KEY_INJECT` 均为 false，行为不变。
+
 ## 修复模式（当前工作重点）
 
 `KeyRepair`：hook 点选在 `KeyStore#containsAlias` 返回 `false` 的那一刻生成 EC 密钥对

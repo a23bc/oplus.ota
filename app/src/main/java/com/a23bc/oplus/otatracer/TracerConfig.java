@@ -260,6 +260,32 @@ public final class TracerConfig {
     /** Caller stacks printed per "this check failed" verdict; keeps volume sane. */
     public static final int PARSE_DIAG_MAX_VERDICT_STACKS = 12;
 
+    // ------------------------------------------- gkaReq=2 download observation
+    //
+    // Why the final download answer is 2713. Observation only: nothing here
+    // rewrites a header, a URL, a body or a signature input.
+
+    /** The signing helper's request builder: a(HttpURLConnection, Context, String, int). */
+    public static final int GKA_REQ_DOWNLOAD = 2;
+
+    /** Classes holding the /ts answer JSON: {"id":..,"ts":..,"uri":..}. */
+    public static final String[] TS_JSON_CLASSES = {"p5.b"};
+
+    /** Method on those classes that returns the JSON. */
+    public static final String[] TS_JSON_METHODS = {"t"};
+
+    /** Substrings that mark a URL as belonging to the OTA backend. */
+    public static final String[] DOWNLOAD_URL_HINTS = {"allawntech", "component-ota"};
+
+    /** Request headers printed verbatim: identifiers, not secrets. */
+    public static final String[] HEADER_KEYS_PLAIN = {"id", "ts"};
+
+    /** Request headers printed as length + SHA-256 only: signature material. */
+    public static final String[] HEADER_KEYS_HASHED = {"ac", "as"};
+
+    /** Captured response bodies are truncated at this many characters. */
+    public static final int MAX_BODY_CHARS = 4000;
+
     /** Tags always echoed when verbose logging is on. */
     public static final String[] VERBOSE_LOG_TAGS = {
             "OTAApplication", "Attestation", "allawn", "pki", "Crypto", "GetInfoThread",

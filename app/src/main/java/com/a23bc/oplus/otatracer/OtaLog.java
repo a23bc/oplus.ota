@@ -241,6 +241,24 @@ public final class OtaLog {
         }
     }
 
+    /**
+     * Full 64-hex SHA-256. Used where two runs must be comparable byte for byte
+     * without printing the value itself (the ac/as request headers).
+     */
+    public static String digestFull(String s) {
+        try {
+            MessageDigest md = MessageDigest.getInstance("SHA-256");
+            byte[] d = md.digest(s.getBytes(StandardCharsets.UTF_8));
+            StringBuilder sb = new StringBuilder();
+            for (byte b : d) {
+                sb.append(String.format("%02x", b));
+            }
+            return sb.toString();
+        } catch (Throwable t) {
+            return "na";
+        }
+    }
+
     // ------------------------------------------------------------------ output
 
     private static void emit(String scope, String msg) {
