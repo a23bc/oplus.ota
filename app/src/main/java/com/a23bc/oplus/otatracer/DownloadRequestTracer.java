@@ -25,10 +25,11 @@ import de.robv.android.xposed.callbacks.XC_LoadPackage;
  * rewritten, and the body capture only observes the bytes the app itself reads -
  * it never reads ahead of the app and never hands back a different stream.
  *
- * Scope discipline: every shared-class callback is gated by the existing
- * OtaLog.callerIsTargetApp() stack filter AND by a URL filter built on the
- * existing ResponseCodeTracer.safeUrl(), so no unrelated HTTP traffic in the
- * process is printed.
+ * Scope discipline: every shared-class callback is gated by otaContext(), which
+ * accepts any one of the OTA call stack, the OTA backend URL (via the existing
+ * ResponseCodeTracer.safeUrl()), or the exact connection b.a(.., 2) was handed.
+ * Any one is enough - requiring the stack test dropped /download entirely, see
+ * otaContext(). No unrelated HTTP traffic in the process is printed.
  */
 public final class DownloadRequestTracer {
 
@@ -333,15 +334,11 @@ public final class DownloadRequestTracer {
                 if (!plain && !hashed) {
                     return;
                 }
-                // Two gates, both reusing existing module machinery:
-                //  - the OTA call-stack filter
-                //  - the OTA endpoint URL filter, or the very connection b.a(..2) got
-                if (!OtaLog.callerIsTargetApp()) {
-                    return;
-                }
+                // Any one of three is enough; see otaContext() for why the stack
+                // test alone is not sufficient here.
                 Object conn = param.thisObject;
                 String url = ResponseCodeTracer.safeUrl(conn);
-                if (!isOtaEndpoint(url) && conn != GKA_CONN.get()) {
+                if (!otaContext(url, conn)) {
                     return;
                 }
                 if (hashed) {
@@ -378,12 +375,9 @@ public final class DownloadRequestTracer {
         @Override
         protected void afterHookedMethod(MethodHookParam param) throws Throwable {
             try {
-                if (!OtaLog.callerIsTargetApp()) {
-                    return;
-                }
                 Object conn = param.thisObject;
                 String url = ResponseCodeTracer.safeUrl(conn);
-                if (!isOtaEndpoint(url)) {
+                if (!otaContext(url, conn)) {
                     return;
                 }
                 Object r = param.getResult();
@@ -416,12 +410,9 @@ public final class DownloadRequestTracer {
         @Override
         protected void afterHookedMethod(MethodHookParam param) throws Throwable {
             try {
-                if (!OtaLog.callerIsTargetApp()) {
-                    return;
-                }
                 Object conn = param.thisObject;
                 String url = ResponseCodeTracer.safeUrl(conn);
-                if (!isOtaEndpoint(url)) {
+                if (!otaContext(url, conn)) {
                     return;
                 }
                 if (param.hasThrowable()) {
@@ -583,6 +574,34 @@ public final class DownloadRequestTracer {
             }
         }
         return false;
+    }
+
+    /**
+     * Is this call part of an OTA request? Any one of three signals is enough:
+     *
+     *   - the call stack contains a com.oplus.ota class
+     *   - the connection points at the OTA backend
+     *   - it is the very connection b.a(.., 2) was handed
+     *
+     * The stack test alone is NOT sufficient, and r17 proved it: the stack filter
+     * only matches the literal prefix "com.oplus.ota", but the thread that issues
+     * /download is u7.a - an obfuscated top-level package. Its stack contains no
+     * com.oplus.ota frame at all, so getResponseCode()/getInputStream() on
+     * /download were silently dropped while /ts (called from
+     * com.oplus.ota.downloader.util.b.p) came through. ThreadTracer already had
+     * this lesson; it identifies app code by class loader, not by name.
+     *
+     * No class loading is done here - resolving stack frames inside a hook is
+     * what corrupted the app class loader and black-screened :ui once before.
+     */
+    private static boolean otaContext(String url, Object conn) {
+        if (conn != null && conn == GKA_CONN.get()) {
+            return true;
+        }
+        if (isOtaEndpoint(url)) {
+            return true;
+        }
+        return OtaLog.callerIsTargetApp();
     }
 
     /**
