@@ -52,11 +52,15 @@ jobs:
       - name: Verify hooks are read-only
         run: |
           set -e
-          if grep -rnE 'setResult|setThrowable|param\.args\[[0-9]+\] *=' app/src/main/java; then
+          # Look for mutation APIs in real code only (comment lines are ignored).
+          HITS=$(grep -rnE 'setResult|setThrowable|param\.args\[[0-9]+\] *=' app/src/main/java || true)
+          CODE_HITS=$(printf '%s\n' "$HITS" | grep -vE ':[0-9]+:[[:space:]]*(\*|//)' || true)
+          if [ -n "$CODE_HITS" ]; then
+            echo "$CODE_HITS"
             echo "ERROR: tracer must never modify params, results or exceptions"
             exit 1
           fi
-          echo "OK: no result/arg/throwable mutation"
+          echo "OK: no result/arg/throwable mutation in code"
 
       - name: Compile check (debug)
         run: gradle :app:compileDebugJavaWithJavac --stacktrace
