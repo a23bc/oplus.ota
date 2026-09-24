@@ -201,6 +201,16 @@ public final class KeyStoreTracer {
                 } else {
                     OtaLog.i(SCOPE, method + " result " + OtaLog.describe(r));
                 }
+
+                // Repair hook point: the app just learned the alias is absent.
+                // We do not change the result - only create the missing key so
+                // the later getKey() finds one.
+                if ("containsAlias".equals(method) && Boolean.FALSE.equals(r)) {
+                    Object a0 = param.args != null && param.args.length > 0 ? param.args[0] : null;
+                    if (a0 instanceof String) {
+                        KeyRepair.onMissingAlias((String) a0);
+                    }
+                }
             } catch (Throwable t) {
                 OtaLog.err(SCOPE, "keystore after logging failed", t);
             }

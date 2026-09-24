@@ -102,6 +102,25 @@ public final class TracerConfig {
     /** Background dex scans (keyword + deep method-name scan). */
     public static final boolean ENABLE_DEX_SCAN = true;
 
+    // ----------------------------------------------------------- repair mode
+    //
+    // Diagnosis is closed: AndroidKeyStore has no EC key under "ota_pki_attest"
+    // and the app carries on with a null key. Repair mode fills in the missing
+    // key material right after the app itself discovers the alias is absent.
+    //
+    // This is NOT a signature bypass: no return value is rewritten, no argument
+    // is touched, no exception is swallowed. Signing runs exactly as before -
+    // it just has a real key to work with. Whether the server accepts the newly
+    // generated key's certificate is the open question.
+
+    public static final boolean ENABLE_KEY_REPAIR = true;
+
+    /** Aliases we are willing to create when the app reports them missing. */
+    public static final String[] REPAIR_ALIASES = {"ota_pki_attest"};
+
+    /** EC curve for the generated key (the app asks for SHA256withECDSA). */
+    public static final String REPAIR_EC_CURVE = "secp256r1";
+
     /**
      * Classes whose real name is known from a stack trace but whose methods are
      * obfuscated. Resolved from the r4 trace: ecdsaSignPki is

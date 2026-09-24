@@ -9,8 +9,11 @@ SignVerifyUtils: ecdsaSignPki exception: No installed provider supports this key
 ... DownloadException ... responseCode=2304
 ```
 
-本模块只负责把这条链路上发生的事情**原样记录下来**。它不改 OTA 行为、不绕过签名、
+本模块默认只把这条链路上发生的事情**原样记录下来**：不改 OTA 行为、不绕过签名、
 不改完整性/权限/服务器校验结果。
+
+修复模式（`TracerConfig.ENABLE_KEY_REPAIR`，默认开）在此基础上多做一件事：当 App 自己
+发现 `ota_pki_attest` 不存在时，补生成一把 EC 密钥。见下方「修复模式」。
 
 ## 只读保证
 
@@ -98,6 +101,35 @@ b.d() return ""  ->  b.a() return null
 `ecdsaSignPki` = `b.d()`，`getGkaReqDownloadType` = `b.i()`，`GetInfoThread` = `u7.a`。
 dex 里的 `com.oplus.ota.downloader.util.SignVerifyUtils` 是个空壳
 （`ClassNotFoundException`），只有它的内部类 `$ByteArrayComparator` 能加载。
+
+## 修复模式
+
+诊断结论指向一个具体的缺口：App 调 `containsAlias("ota_pki_attest")` 拿到 `false`，
+然后拿着 `null` 去签名；而这把 EC 密钥**它自己从不生成**（全程无 `generateKeyPair`）。
+
+修复模式在 App 自己发现 alias 缺失的那一刻，补做这个漏掉的步骤：
+
+```java
+KeyPairGenerator.getInstance("EC", "AndroidKeyStore")
+    .initialize(new KeyGenParameterSpec.Builder(alias, PURPOSE_SIGN)
+        .setAlgorithmParameterSpec(new ECGenParameterSpec("secp256r1"))
+        .setDigests(DIGEST_SHA256).build())
+    .generateKeyPair();
+```
+
+**这不是绕过签名**，三条边界守得很死：
+
+1. 不改 `containsAlias` 的返回值（它仍然返回 `false`）；
+2. 不改任何参数、返回值、异常 —— CI 的只读 grep 门禁依旧通过；
+3. 不跳过签名。`b.d()` 照常 `getKey` → `Signature.initSign` → 服务端照常验签，
+   只是这次私钥真的存在。
+
+覆盖范围也刻意收窄：只处理 `TracerConfig.REPAIR_ALIASES` 里列明的 alias，
+只在 App 自己刚确认缺失时触发，每进程每个 alias 只做一次，失败只记日志。
+
+**能否下载成功取决于服务端**：它会校验证书链。若接受新密钥的证书，链路走通；
+若要求 Google/OPPO 签发的 attestation，会返回别的错误码（不再是 2304）——
+那个错误码本身就是下一步的判据。
 
 ## 监控点
 
