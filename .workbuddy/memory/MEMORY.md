@@ -174,15 +174,19 @@ grep 门禁依旧通过）、**不跳过签名**，服务端照常验签。只�
 `ResponseCodeTracer` / `KeyStoreTracer` / `SpTracer` / `LogTracer`。
 
 
-## 分支约定（2026-09-25 修正）
+## 分支约定（2026-09-25 定稿）
 
-**远端默认分支是 `feat/ota-download-tracer`，不是 `main`。**
-`main` 是我这轮用 `git push origin tracer:main` 推出来的镜像分支，属于多余的。
+**远端默认分支是 `main`**。由用户指定后用 `gh repo edit a23bc/oplus.ota --default-branch main` 改过来的。
+
+`feat/ota-download-tracer` 是早期遗留分支，是**当时**的默认分支；内容已与 main 一致，
+属冗余，等用户决定是否删除。
 
 - 本地分支固定叫 `tracer`（**本机 git 写不了带斜杠的 ref**，所以不能建同名分支，
   也设不了 upstream tracking）
 - 推默认分支用显式 refspec：
+
   ```bash
-  git push origin tracer:feat/ota-download-tracer
+  git push origin tracer:main
   ```
-- 不要再往 `main` 推
+
+- 不要再往 `feat/ota-download-tracer` 推
