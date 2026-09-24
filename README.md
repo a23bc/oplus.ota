@@ -60,6 +60,45 @@ seq=50 t=+1400ms [Response] responseCode=2304 url=https://.../ota/query?keys=[..
 
 `seq` 单调递增、`t` 是相对进程启动的毫秒数 —— 两者用来判断**先后顺序**。
 
+## 诊断结论（已闭环，真机验证）
+
+点击「下载内部测试包」失败的完整链路：
+
+```
+b.i()  getGkaReqDownloadType        -> 读 gka_req_download=2
+b.a()  主流程
+  ├─ /ts 请求                      -> HTTP 200
+  ├─ b.g()  KeyStore.containsAlias("ota_pki_attest") -> false   <- 已知不存在
+  │         返回 3204B base64 证书链 (b.h() -> Certificate[])
+  └─ b.d()  ecdsaSignPki(p5.b)
+       ├─ KeyStore.getKey("ota_pki_attest")        -> null
+       ├─ Signature.getInstance("SHA256withECDSA")
+       └─ initSign(null) -> InvalidKeyException:
+          No installed provider supports this key: (null)
+b.d() return ""  ->  b.a() return null
+  -> GetInfoThread: download denied, response msg:{"body":null,"errMsg":"2304"}
+  -> DownloadException mCode=2 mGKACode=2304
+```
+
+要点：
+
+- **2304 不是 HTTP 状态码**，也不是服务端返回的。`/ts`、`/download` 两个请求都是 200，
+  `body:null` 表明它是签名失败后**本地构造**的业务错误码。
+- **根因**：AndroidKeyStore 中不存在 alias `ota_pki_attest` 的 EC 私钥。
+  同进程 `ota_simple_key`（AES）能取到，KeyStore 本身正常。
+- **该密钥不是 OTA 生成的**：全程没有任何 `KeyPairGenerator#generateKeyPair`
+  调用（唯一的 `generateKey` 是 allawn 的数字信封 AES 密钥，与 PKI 无关）。
+  它是外部预置的密钥对（带 attestation 证书链），OTA 只读取。
+- **代码侧缺陷**：`containsAlias` 已经返回 `false`，却没有任何降级或重新申请分支，
+  仍然继续 `getKey` → `null` → `initSign(null)`，异常被 catch 后返回空串。
+- **有证书无私钥**：`b.g()` 拿到了 3204 字节证书链（`b.h()` 解析为 `Certificate[]`），
+  但对应的私钥不在 KeyStore 里。
+
+混淆映射（该 ROM 上）：`SignVerifyUtils` = `com.oplus.ota.downloader.util.b`，
+`ecdsaSignPki` = `b.d()`，`getGkaReqDownloadType` = `b.i()`，`GetInfoThread` = `u7.a`。
+dex 里的 `com.oplus.ota.downloader.util.SignVerifyUtils` 是个空壳
+（`ClassNotFoundException`），只有它的内部类 `$ByteArrayComparator` 能加载。
+
 ## 监控点
 
 | scope | 目标 | 抓什么 |
