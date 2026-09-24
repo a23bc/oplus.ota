@@ -33,6 +33,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
         GetInfoThreadTracer.install(lpparam);
         DownloadExceptionTracer.install(lpparam);
         DownloadRequestTracer.install(lpparam);
+        AttestationStateTracer.install(lpparam);
 
         // ...then resolve the known FQCNs and schedule the background scans.
         // Class loading itself is never hooked - see ClassHunter.
