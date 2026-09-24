@@ -92,6 +92,7 @@ public final class ResponseCodeTracer {
                 OtaLog.err(SCOPE, "response logging failed", t);
             }
         }
+    }
 
     /**
      * scheme://host/path plus query *names* only - values may be tokens.
